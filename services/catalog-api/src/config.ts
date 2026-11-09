@@ -27,6 +27,8 @@ const schema = z.object({
     .string()
     .default("")
     .transform((s) => s.split(",").map((e) => e.trim().toLowerCase()).filter(Boolean)),
+  /** Secure cookies need HTTPS; the local k3d ingress is plain HTTP. Defaults to NODE_ENV=production. */
+  COOKIE_SECURE: z.enum(["true", "false"]).optional(),
   MAX_UPLOAD_BYTES: z.coerce.number().int().default(200 * 1024 * 1024),
   UPLOAD_PART_BYTES: z.coerce.number().int().min(5 * 1024 * 1024).default(8 * 1024 * 1024),
 });

@@ -25,7 +25,7 @@ describe.runIf(run)("applyJobStatus (Postgres)", () => {
   const video = async (id: string) => (await db.select().from(videos).where(eq(videos.id, id)))[0]!;
 
   beforeAll(async () => {
-    await runMigrations(db);
+    await runMigrations(db, sql);
     const [u] = await db.insert(users).values({ email: `jobs-${Date.now()}@example.test`, passwordHash: "x" }).returning();
     ownerId = u!.id;
   });

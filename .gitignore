@@ -3,6 +3,8 @@
 .env.*
 !.env.example
 *.secret.yaml
+deploy/helm/secrets.local.yaml
+deploy/helm/*/charts/
 
 # deps / build
 node_modules/

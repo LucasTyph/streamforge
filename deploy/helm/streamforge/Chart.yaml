@@ -1,0 +1,9 @@
+apiVersion: v2
+name: streamforge
+description: StreamForge application - web, catalog-api, progress-svc and pipeline workers
+type: application
+version: 0.1.0
+dependencies:
+  - name: sf-lib
+    version: 0.1.0
+    repository: file://../sf-lib

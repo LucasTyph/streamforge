@@ -26,7 +26,7 @@ describe.runIf(run)("presigned multipart upload flow", () => {
   };
 
   beforeAll(async () => {
-    await runMigrations(db);
+    await runMigrations(db, sql);
     app = await buildApp({ cfg, db, storage: createStorage(cfg), events: createEvents(cfg) });
     const email = `it-${Date.now()}@example.test`;
     const r = await api("POST", "/auth/signup", { email, password: "integration-pw" });

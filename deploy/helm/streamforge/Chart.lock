@@ -1,0 +1,6 @@
+dependencies:
+- name: sf-lib
+  repository: file://../sf-lib
+  version: 0.1.0
+digest: sha256:c295f47c823f4eb533dda8bdea7a39e81d20e7051ee1155cdd9f604ce19943e3
+generated: "2026-11-09T16:37:23.755042797-03:00"

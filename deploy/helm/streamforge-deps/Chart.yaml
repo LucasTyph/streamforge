@@ -1,0 +1,9 @@
+apiVersion: v2
+name: streamforge-deps
+description: In-cluster dependencies for StreamForge - Postgres (CloudNativePG), Redis, AWS emulators, Terraform bootstrap
+type: application
+version: 0.1.0
+dependencies:
+  - name: sf-lib
+    version: 0.1.0
+    repository: file://../sf-lib

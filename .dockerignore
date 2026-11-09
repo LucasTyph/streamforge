@@ -1,0 +1,12 @@
+**/node_modules
+**/.next
+**/dist
+**/.env
+**/.env.*
+**/test-results
+**/playwright-report
+**/*.tfstate*
+**/.terraform
+.git
+media
+docs

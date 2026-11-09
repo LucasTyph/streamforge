@@ -1,0 +1,42 @@
+{{ include "sf-lib.defaultDeny" . }}
+{{ include "sf-lib.workload" (dict "ctx" $ "name" "redis" "c" .Values.redis) }}
+{{ include "sf-lib.workload" (dict "ctx" $ "name" "seaweedfs" "c" .Values.seaweedfs) }}
+{{ include "sf-lib.workload" (dict "ctx" $ "name" "elasticmq" "c" .Values.elasticmq) }}
+{{ include "sf-lib.workload" (dict "ctx" $ "name" "sns-shim" "c" .Values.snsShim) }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: elasticmq
+data:
+  elasticmq.conf: |-
+{{ .Files.Get "files/elasticmq.conf" | indent 4 }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: streamforge-s3
+type: Opaque
+stringData:
+  accessKey: {{ required "s3.accessKey (make secrets)" .Values.s3.accessKey | quote }}
+  secretKey: {{ required "s3.secretKey (make secrets)" .Values.s3.secretKey | quote }}
+  # SeaweedFS identities: full access for our services; anonymous read on processed media only.
+  s3.json: |
+    {"identities":[
+      {"name":"streamforge","credentials":[{"accessKey":{{ .Values.s3.accessKey | quote }},"secretKey":{{ .Values.s3.secretKey | quote }}}],
+       "actions":["Admin","Read","Write","List","Tagging"]},
+      {"name":"anonymous","actions":["Read:streamforge-processed"]}]}
+---
+# Browser-facing S3 endpoint: presigned uploads and HLS/thumbnail reads.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: s3
+spec:
+  rules:
+    - host: {{ .Values.s3.publicHost }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: seaweedfs, port: { number: 8333 } } }

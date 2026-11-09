@@ -1,0 +1,5 @@
+apiVersion: v2
+name: sf-lib
+description: Shared templates for StreamForge workloads (workload, service, PDB, NetworkPolicy)
+type: library
+version: 0.1.0

@@ -9,7 +9,7 @@ const url = process.env.DATABASE_URL;
 if (!url) throw new Error("DATABASE_URL is required");
 
 const { db, sql } = createDb(url);
-await runMigrations(db);
+await runMigrations(db, sql);
 const passwordHash = await hashPassword(password);
 await db.insert(users).values({ email, passwordHash }).onConflictDoUpdate({ target: users.email, set: { passwordHash } });
 console.log(`seeded demo user ${email}`);

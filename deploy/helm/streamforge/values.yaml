@@ -1,0 +1,150 @@
+global:
+  registry: registry.localhost:5111
+  imageTag: "" # set by `make up` (git SHA)
+
+host: streamforge.localhost
+s3PublicUrl: http://s3.streamforge.localhost
+
+# From the gitignored deploy/helm/secrets.local.yaml (`make secrets`).
+jwtSecret: ""
+adminEmails: demo@streamforge.local
+seedUser: { email: demo@streamforge.local, password: demo-password }
+
+# Shared by every service that talks to the AWS emulators (streamforge-deps release).
+awsEnv: &awsEnv
+  AWS_REGION: us-east-1
+  AWS_ENDPOINT_URL_S3: http://seaweedfs:8333
+  AWS_ENDPOINT_URL_SQS: http://elasticmq:9324
+  AWS_ENDPOINT_URL_SNS: http://sns-shim:9911
+awsSecretEnv: &awsSecretEnv
+  - { name: AWS_ACCESS_KEY_ID, secret: streamforge-s3, key: accessKey }
+  - { name: AWS_SECRET_ACCESS_KEY, secret: streamforge-s3, key: secretKey }
+workerEnv: &workerEnv
+  <<: *awsEnv
+  REDIS_URL: redis://redis:6379
+  JOB_STATUS_TOPIC_ARN: arn:aws:sns:us-east-1:000000000000:streamforge-job-status
+  PROCESSED_BUCKET: streamforge-processed
+  WORK_DIR: /work
+  HEALTH_PORT: "8080"
+workerEgress: &workerEgress
+  - { name: seaweedfs, port: 8333 }
+  - { name: elasticmq, port: 9324 }
+  - { name: sns-shim, port: 9911 }
+  - { name: redis, port: 6379 }
+
+catalogApi:
+  image: { repository: streamforge/catalog-api }
+  replicas: 2
+  port: 4000
+  env:
+    <<: *awsEnv
+    NODE_ENV: production
+    API_PORT: "4000"
+    COOKIE_SECURE: "false" # plain HTTP on the local ingress; true behind TLS
+    WEB_ORIGIN: "http://{{ .Values.host }}"
+    S3_PUBLIC_ENDPOINT: "{{ .Values.s3PublicUrl }}"
+    PROCESSED_PUBLIC_URL: "{{ .Values.s3PublicUrl }}/streamforge-processed"
+    RAW_BUCKET: streamforge-raw
+    VIDEO_UPLOADED_TOPIC_ARN: arn:aws:sns:us-east-1:000000000000:streamforge-video-uploaded
+    CATALOG_STATUS_QUEUE_URL: http://elasticmq:9324/000000000000/streamforge-catalog-status
+    QUEUE_PREFIX: streamforge-
+    REDIS_URL: redis://redis:6379
+    ADMIN_EMAILS: "{{ .Values.adminEmails }}"
+  secretEnv: # YAML can't splice lists, so the AWS entries are repeated here
+    - { name: AWS_ACCESS_KEY_ID, secret: streamforge-s3, key: accessKey }
+    - { name: AWS_SECRET_ACCESS_KEY, secret: streamforge-s3, key: secretKey }
+    - { name: DATABASE_URL, secret: streamforge-pg-app, key: uri }
+    - { name: JWT_SECRET, secret: streamforge-app, key: jwtSecret }
+  probes: { initialDelaySeconds: 10 }
+  emptyDirs: [{ name: tmp, mountPath: /tmp }]
+  pdb: { minAvailable: 1 }
+  terminationGracePeriodSeconds: 30
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits: { memory: 384Mi }
+  networkPolicy:
+    from: [ingress]
+    to:
+      - { cnpgCluster: streamforge-pg, port: 5432 }
+      - { name: seaweedfs, port: 8333 }
+      - { name: elasticmq, port: 9324 }
+      - { name: sns-shim, port: 9911 }
+      - { name: redis, port: 6379 }
+
+web:
+  image: { repository: streamforge/web }
+  replicas: 2
+  port: 3000
+  probes: { liveness: /login, readiness: /login }
+  emptyDirs: [{ name: next-cache, mountPath: /app/apps/web/.next/cache }]
+  pdb: { minAvailable: 1 }
+  resources:
+    requests: { cpu: 50m, memory: 96Mi }
+    limits: { memory: 256Mi }
+  networkPolicy:
+    from: [ingress]
+
+progressSvc:
+  image: { repository: streamforge/progress-svc }
+  replicas: 1
+  port: 4001
+  env:
+    PORT: "4001"
+    REDIS_URL: redis://redis:6379
+    WEB_ORIGIN: "http://{{ .Values.host }}"
+  secretEnv:
+    - { name: JWT_SECRET, secret: streamforge-app, key: jwtSecret }
+  probes: {}
+  terminationGracePeriodSeconds: 25 # streams close at the next 15 s heartbeat
+  resources:
+    requests: { cpu: 10m, memory: 16Mi }
+    limits: { memory: 64Mi }
+  networkPolicy:
+    from: [ingress]
+    to: [{ name: redis, port: 6379 }]
+
+probeWorker:
+  image: { repository: streamforge/probe-worker }
+  replicas: 1
+  env:
+    <<: *workerEnv
+    VIDEO_PROBED_TOPIC_ARN: arn:aws:sns:us-east-1:000000000000:streamforge-video-probed
+    PROBE_QUEUE_URL: http://elasticmq:9324/000000000000/streamforge-probe
+  secretEnv: *awsSecretEnv
+  probes: { port: 8080 }
+  emptyDirs: [{ name: work, mountPath: /work, sizeLimit: 64Mi }]
+  terminationGracePeriodSeconds: 40 # > DrainTimeout (30 s)
+  resources:
+    requests: { cpu: 50m, memory: 32Mi }
+    limits: { memory: 128Mi }
+  networkPolicy: { to: *workerEgress }
+
+transcodeWorker:
+  image: { repository: streamforge/transcode-worker }
+  replicas: 1
+  env:
+    <<: *workerEnv
+    TRANSCODE_QUEUE_URL: http://elasticmq:9324/000000000000/streamforge-transcode
+  secretEnv: *awsSecretEnv
+  probes: { port: 8080 }
+  emptyDirs: [{ name: work, mountPath: /work, sizeLimit: 1Gi }]
+  terminationGracePeriodSeconds: 15 # > DrainTimeout (5 s); long jobs are released, not finished
+  resources:
+    requests: { cpu: 500m, memory: 256Mi }
+    limits: { cpu: "2", memory: 1Gi }
+  networkPolicy: { to: *workerEgress }
+
+thumbnailWorker:
+  image: { repository: streamforge/thumbnail-worker }
+  replicas: 1
+  env:
+    <<: *workerEnv
+    THUMBNAIL_QUEUE_URL: http://elasticmq:9324/000000000000/streamforge-thumbnail
+  secretEnv: *awsSecretEnv
+  probes: { port: 8080 }
+  emptyDirs: [{ name: work, mountPath: /work, sizeLimit: 256Mi }]
+  terminationGracePeriodSeconds: 30 # > DrainTimeout (20 s)
+  resources:
+    requests: { cpu: 200m, memory: 96Mi }
+    limits: { cpu: "1", memory: 384Mi }
+  networkPolicy: { to: *workerEgress }

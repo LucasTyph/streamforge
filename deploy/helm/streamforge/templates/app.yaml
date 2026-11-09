@@ -1,0 +1,57 @@
+{{ include "sf-lib.defaultDeny" . }}
+{{ include "sf-lib.workload" (dict "ctx" $ "name" "catalog-api" "c" .Values.catalogApi) }}
+{{ include "sf-lib.workload" (dict "ctx" $ "name" "web" "c" .Values.web) }}
+{{ include "sf-lib.workload" (dict "ctx" $ "name" "progress-svc" "c" .Values.progressSvc) }}
+{{ include "sf-lib.workload" (dict "ctx" $ "name" "probe-worker" "c" .Values.probeWorker) }}
+{{ include "sf-lib.workload" (dict "ctx" $ "name" "transcode-worker" "c" .Values.transcodeWorker) }}
+{{ include "sf-lib.workload" (dict "ctx" $ "name" "thumbnail-worker" "c" .Values.thumbnailWorker) }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: streamforge-app
+type: Opaque
+stringData:
+  jwtSecret: {{ required "jwtSecret (make secrets)" .Values.jwtSecret | quote }}
+  seedPassword: {{ .Values.seedUser.password | quote }}
+---
+# One host: / -> web, /api -> catalog-api (prefix stripped), /events -> progress-svc (SSE).
+# Same origin, so the session cookie reaches the API and the event stream with no CORS.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: strip-api
+spec:
+  stripPrefix:
+    prefixes: [/api]
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: streamforge-api
+  annotations:
+    traefik.ingress.kubernetes.io/router.middlewares: {{ .Release.Namespace }}-strip-api@kubernetescrd
+spec:
+  rules:
+    - host: {{ .Values.host }}
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend: { service: { name: catalog-api, port: { number: 4000 } } }
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: streamforge
+spec:
+  rules:
+    - host: {{ .Values.host }}
+      http:
+        paths:
+          - path: /events
+            pathType: Prefix
+            backend: { service: { name: progress-svc, port: { number: 4001 } } }
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: web, port: { number: 3000 } } }

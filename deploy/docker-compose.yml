@@ -52,7 +52,7 @@ services:
     image: softwaremill/elasticmq-native:1.7.1
     ports: ["9324:9324", "9325:9325"]
     volumes:
-      - ./elasticmq/elasticmq.conf:/opt/elasticmq.conf:ro
+      - ./helm/streamforge-deps/files/elasticmq.conf:/opt/elasticmq.conf:ro
     mem_limit: 128m
 
   # Minimal SNS emulator that fans out to ElasticMQ (go/cmd/sns-shim)

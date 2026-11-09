@@ -1,0 +1,27 @@
+# k3d cluster for StreamForge: 1 server + 2 agents, local registry, Traefik ingress on :80.
+# Create with `make cluster` (k3d cluster create --config deploy/k3d/cluster.yaml).
+apiVersion: k3d.io/v1alpha5
+kind: Simple
+metadata:
+  name: streamforge
+servers: 1
+agents: 2
+image: rancher/k3s:v1.37.2-k3s1
+ports:
+  - port: 80:80 # http://streamforge.localhost and http://s3.streamforge.localhost
+    nodeFilters: [loadbalancer]
+registries:
+  create:
+    name: registry.localhost # in-cluster: registry.localhost:5111
+    host: "0.0.0.0"
+    hostPort: "5111" # push from the host: localhost:5111/...
+options:
+  k3s:
+    extraArgs:
+      # servicelb stays enabled: it binds Traefik's LoadBalancer Service to :80 on the nodes,
+      # which is what the k3d load balancer forwards to.
+      - arg: --kubelet-arg=eviction-hard=memory.available<200Mi
+        nodeFilters: [server:*, agent:*]
+  kubeconfig:
+    updateDefaultKubeconfig: true
+    switchCurrentContext: true

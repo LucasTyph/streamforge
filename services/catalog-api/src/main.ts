@@ -7,7 +7,7 @@ import { startStatusConsumer } from "./status-consumer.js";
 
 const cfg = loadConfig();
 const { db, sql } = createDb(cfg.DATABASE_URL);
-await runMigrations(db);
+await runMigrations(db, sql);
 
 const app = await buildApp({ cfg, db, storage: createStorage(cfg), events: createEvents(cfg) });
 await app.listen({ host: "0.0.0.0", port: cfg.API_PORT });

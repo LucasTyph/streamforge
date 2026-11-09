@@ -1,0 +1,97 @@
+{{- $c := .Values.terraform }}
+# Applies infra/terraform/local (buckets, CORS, topics, subscriptions) to the in-cluster
+# emulators after every install/upgrade. State lives in a Kubernetes Secret via the
+# `kubernetes` backend, so re-runs are incremental, as in a real pipeline.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: terraform-local
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: terraform-state
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [get, list, create, update, delete]
+  - apiGroups: [coordination.k8s.io]
+    resources: [leases]
+    verbs: [get, list, create, update, delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: terraform-state
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: Role, name: terraform-state }
+subjects: [{ kind: ServiceAccount, name: terraform-local, namespace: {{ .Release.Namespace }} }]
+---
+{{ include "sf-lib.networkPolicy" (dict "ctx" $ "name" "terraform-local" "np" (dict "to" (list (dict "name" "seaweedfs" "port" 8333) (dict "name" "sns-shim" "port" 9911)) "kubeApi" true)) }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: terraform-local
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  backoffLimit: 10 # emulators may still be starting
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: terraform-local
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      serviceAccountName: terraform-local
+      restartPolicy: Never # failed attempts keep their pod and logs for debugging
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: terraform
+          image: {{ include "sf-lib.image" (dict "ctx" $ "c" $c) }}
+          command: [/bin/sh, -ec]
+          args:
+            - |
+              cp -r /tf /work/tf && cd /work/tf/local
+              cat > backend_override.tf <<EOF
+              terraform {
+                backend "kubernetes" {
+                  secret_suffix     = "streamforge-local"
+                  namespace         = "{{ .Release.Namespace }}"
+                  in_cluster_config = true
+                }
+              }
+              EOF
+              terraform init -input=false -reconfigure
+              terraform apply -auto-approve -input=false \
+                -var s3_endpoint=http://seaweedfs:8333 \
+                -var sns_endpoint=http://sns-shim:9911 \
+                -var sqs_endpoint=http://elasticmq:9324
+          env:
+            - { name: HOME, value: /work }
+            - { name: TF_IN_AUTOMATION, value: "1" }
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom: { secretKeyRef: { name: streamforge-s3, key: accessKey } }
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom: { secretKeyRef: { name: streamforge-s3, key: secretKey } }
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { memory: 1Gi } # terraform + the AWS provider plugin; short-lived
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          # /tmp: the provider plugin's handshake socket (read-only root filesystem otherwise)
+          volumeMounts: [{ name: work, mountPath: /work }, { name: tmp, mountPath: /tmp }]
+      volumes:
+        - name: work
+          # `terraform init` unpacks the ~700 MB AWS provider here. A 512Mi limit got the pod
+          # evicted mid-apply (exit 137), which also left the state lock behind.
+          emptyDir: { sizeLimit: 2Gi }
+        - name: tmp
+          emptyDir: { sizeLimit: 64Mi }

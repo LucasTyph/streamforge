@@ -1,0 +1,42 @@
+{{- $pg := .Values.postgres }}
+# Postgres managed by the CloudNativePG operator (installed by `make platform`).
+# The operator creates the `<name>-app` Secret (uri, username, password) the API reads.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ $pg.name }}
+spec:
+  instances: {{ $pg.instances }}
+  imageName: {{ $pg.image }}
+  storage:
+    size: {{ $pg.storage }}
+  resources: {{- toYaml $pg.resources | nindent 4 }}
+  postgresql:
+    parameters:
+      max_connections: "50"
+      shared_buffers: 64MB
+  bootstrap:
+    initdb:
+      database: streamforge
+      owner: streamforge
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $pg.name }}
+spec:
+  podSelector:
+    matchLabels: { cnpg.io/cluster: {{ $pg.name }} }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: { matchLabels: { app.kubernetes.io/name: catalog-api } }
+        - podSelector: { matchLabels: { app.kubernetes.io/name: catalog-api-seed } }
+      ports: [{ protocol: TCP, port: 5432 }]
+    - from: # the operator polls instance status and manages replication
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: cnpg-system } }
+      ports: [{ protocol: TCP, port: 8000 }, { protocol: TCP, port: 5432 }]
+    - from:
+        - podSelector: { matchLabels: { cnpg.io/cluster: {{ $pg.name }} } }
+# Egress is not restricted for Postgres pods: the instance manager talks to the Kubernetes
+# API, whose address differs per distribution (see docs/adr/005-kubernetes.md).

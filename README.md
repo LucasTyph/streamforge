@@ -4,7 +4,7 @@ Event-driven video processing platform: upload a video in the browser, and a pip
 autoscaling workers probes it, transcodes it to adaptive HLS, and generates thumbnails,
 with live progress in the UI.
 
-> **Status:** M3 (player, live progress, Ops page) complete; M4 (containers + Kubernetes) next. See [docs/PROGRESS.md](docs/PROGRESS.md).
+> **Status:** M4 (containers + Kubernetes) complete; M5 (CI/CD, GitOps, AWS IaC) next. See [docs/PROGRESS.md](docs/PROGRESS.md).
 
 ## Stack
 Go workers · TypeScript/Fastify API · Next.js · Postgres · Redis · Kubernetes (k3d, Helm,
@@ -34,7 +34,13 @@ API docs: http://localhost:4000/docs. `make help` lists all targets.
 | `make lint` | go vet/gofmt, tsc, terraform fmt |
 | `make down` / `make clean` | Stop the stack / also delete its data |
 
-`make up` (full stack on k3d) arrives in M4.
+## Run it on Kubernetes (k3d)
+```bash
+make up-lite    # k3d cluster + CloudNativePG + images + Helm releases (~10 min the first time)
+```
+Then open http://streamforge.localhost (demo user as above). `make status` shows pods and
+resource usage; `make down` deletes the cluster. Stop the compose dev stack first
+(`make dev-down`) to stay within the RAM budget. Design notes: [ADR-005](docs/adr/005-kubernetes.md).
 
 ## Limitations
 - Local SQS queues are declared in ElasticMQ's config, not Terraform (ADR-002).

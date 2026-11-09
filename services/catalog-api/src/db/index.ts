@@ -9,10 +9,21 @@ export function createDb(url: string) {
   return { db: drizzle(sql, { schema }), sql };
 }
 
+/** Arbitrary constant: serializes migrations across API replicas and the seed Job. */
+const MIGRATION_LOCK = 727_001;
+
 export type Db = ReturnType<typeof createDb>["db"];
 
 const migrationsFolder = fileURLToPath(new URL("../../drizzle", import.meta.url));
 
-export async function runMigrations(db: Db) {
-  await migrate(db, { migrationsFolder });
+export async function runMigrations(db: Db, sql: postgres.Sql) {
+  // Session-level advisory lock on a dedicated connection; migrations run on the pool.
+  const lock = await sql.reserve();
+  try {
+    await lock`select pg_advisory_lock(${MIGRATION_LOCK})`;
+    await migrate(db, { migrationsFolder });
+  } finally {
+    await lock`select pg_advisory_unlock(${MIGRATION_LOCK})`.catch(() => {});
+    lock.release();
+  }
 }

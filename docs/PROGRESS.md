@@ -44,5 +44,15 @@
 
 **M3 complete (2026-11-09).** Videos processed before M3 have no thumbnails (not backfilled).
 
-## M4–M7
+## M4 — Containers + Kubernetes
+- [x] Multi-stage, non-root images: Go on distroless static, ffmpeg workers on Alpine 3.24 (ffmpeg 8.1.3), catalog-api and web (Next.js standalone) on distroless Node 26; HEALTHCHECK where the image has a runtime. Sizes in results.md
+- [x] k3d cluster: 1 server + 2 agents (k3s v1.37.2), local registry, Traefik ingress on :80 (`deploy/k3d/cluster.yaml`)
+- [x] Helm: `sf-lib` library chart + `streamforge-deps` + `streamforge` ([ADR-005](adr/005-kubernetes.md)): probes, requests/limits, PDBs, default-deny NetworkPolicies with per-component allow-lists, ServiceAccounts (no token unless needed), read-only root filesystems, Secrets from a gitignored file
+- [x] CloudNativePG (operator 1.30.1) for Postgres, Redis StatefulSet, SeaweedFS/ElasticMQ/sns-shim in-cluster, Terraform Job with `kubernetes` state backend and offline provider mirror
+- [x] Migrations under a Postgres advisory lock; seed Job; `COOKIE_SECURE` setting
+- [x] Acceptance: `make up-lite` -> http://streamforge.localhost; Playwright e2e passes against the cluster (2026-11-09)
+
+**M4 complete (2026-11-09).** `make up` = `make up-lite` until observability lands in M6.
+
+## M5–M7
 Not started. See the build brief.

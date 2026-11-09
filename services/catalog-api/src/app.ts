@@ -74,7 +74,8 @@ export async function buildApp(deps: AppDeps, opts: FastifyServerOptions = {}) {
     }
   });
 
-  await app.register(authRoutes(db, cfg.NODE_ENV === "production", cfg.ADMIN_EMAILS));
+  const secureCookies = cfg.COOKIE_SECURE ? cfg.COOKIE_SECURE === "true" : cfg.NODE_ENV === "production";
+  await app.register(authRoutes(db, secureCookies, cfg.ADMIN_EMAILS));
   await app.register(adminRoutes({ db, region: cfg.AWS_REGION, queuePrefix: cfg.QUEUE_PREFIX, adminEmails: cfg.ADMIN_EMAILS }));
   await app.register(videoRoutes({ db, storage: deps.storage, events: deps.events, cfg }));
   return app;
