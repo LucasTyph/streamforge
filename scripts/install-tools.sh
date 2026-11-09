@@ -13,6 +13,15 @@ K6_VERSION=2.3.0
 JQ_VERSION=1.8.2
 TERRAFORM_VERSION=1.17.1
 
+# apt prerequisites (need sudo, so we only check them)
+missing=""
+for p in make ffmpeg unzip libatomic1; do dpkg -s $p >/dev/null 2>&1 || missing="$missing $p"; done
+if [ -n "$missing" ]; then
+  echo "Missing system packages:$missing" >&2
+  echo "Run: sudo apt update && sudo apt install -y$missing" >&2
+  exit 1
+fi
+
 PREFIX="$HOME/.local"; BIN="$PREFIX/bin"; OPT="$PREFIX/opt"
 mkdir -p "$BIN" "$OPT"
 TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
