@@ -8,7 +8,7 @@
     "start": "next start -p 3000",
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "vitest run --exclude \"e2e/**\" --exclude \"node_modules/**\"",
     "test:e2e": "playwright test"
   },
   "dependencies": {
