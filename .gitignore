@@ -1,0 +1,36 @@
+# env / secrets
+.env
+.env.*
+!.env.example
+*.secret.yaml
+
+# deps / build
+node_modules/
+.next/
+dist/
+bin/
+coverage/
+.pnpm-store/
+.tools/
+
+# terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+
+# test media / data
+media/
+*.mp4
+*.mov
+*.mkv
+playwright-report/
+test-results/
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
