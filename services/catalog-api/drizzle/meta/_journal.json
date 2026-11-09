@@ -15,6 +15,13 @@
       "when": 1794248599264,
       "tag": "0001_strange_true_believers",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1794250597268,
+      "tag": "0002_mature_leech",
+      "breakpoints": true
     }
   ]
 }

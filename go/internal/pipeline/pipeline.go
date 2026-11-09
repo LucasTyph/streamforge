@@ -100,7 +100,7 @@ func (p *Probe) Handle(ctx context.Context, m worker.Message) error {
 	if err := p.status(ctx, ev.VideoID, "probe", events.Running, m.ReceiveCount, "", nil); err != nil {
 		return err
 	}
-	p.Progress.Report(ctx, progress.Event{VideoID: ev.VideoID, Task: "probe", Stage: "probing"})
+	p.Progress.Report(ctx, progress.Event{OwnerID: ev.OwnerID, VideoID: ev.VideoID, Task: "probe", Stage: "probing"})
 
 	url, err := p.Store.PresignGet(ctx, ev.Bucket, ev.Key, 10*time.Minute)
 	if err != nil {
@@ -127,7 +127,7 @@ func (p *Probe) Handle(ctx context.Context, m worker.Message) error {
 
 	rs := media.PlanRenditions(info.Width, info.Height)
 	probed := events.VideoProbed{
-		Type: "video.probed", VideoID: ev.VideoID, Bucket: ev.Bucket, Key: ev.Key,
+		Type: "video.probed", VideoID: ev.VideoID, OwnerID: ev.OwnerID, Bucket: ev.Bucket, Key: ev.Key,
 		DurationSeconds: info.DurationSeconds, Width: info.Width, Height: info.Height,
 		HasAudio: info.HasAudio, Renditions: rs,
 	}
@@ -135,7 +135,7 @@ func (p *Probe) Handle(ctx context.Context, m worker.Message) error {
 		return fmt.Errorf("publish video-probed: %w", err)
 	}
 	log.Info("probed", "duration", info.DurationSeconds, "width", info.Width, "height", info.Height, "renditions", len(rs))
-	p.Progress.Report(ctx, progress.Event{VideoID: ev.VideoID, Task: "probe", Stage: "probing", Percent: 100})
+	p.Progress.Report(ctx, progress.Event{OwnerID: ev.OwnerID, VideoID: ev.VideoID, Task: "probe", Stage: "probing", Percent: 100})
 	return p.status(ctx, ev.VideoID, "probe", events.Succeeded, m.ReceiveCount, "", map[string]any{
 		"durationSeconds": info.DurationSeconds, "width": info.Width, "height": info.Height, "hasAudio": info.HasAudio,
 	})
@@ -197,7 +197,7 @@ func (t *Transcode) Handle(ctx context.Context, m worker.Message) error {
 
 	start := time.Now()
 	report := func(f float64) {
-		t.Progress.Report(ctx, progress.Event{VideoID: ev.VideoID, Task: "transcode", Stage: "transcoding", Percent: f * 100})
+		t.Progress.Report(ctx, progress.Event{OwnerID: ev.OwnerID, VideoID: ev.VideoID, Task: "transcode", Stage: "transcoding", Percent: f * 100})
 	}
 	if err := t.runFFmpeg(ctx, media.TranscodeArgs(src, out, ev.Renditions, ev.HasAudio), ev.DurationSeconds, report); err != nil {
 		return err

@@ -28,6 +28,8 @@ export const videos = pgTable(
     width: integer("width"),
     height: integer("height"),
     hlsMasterKey: text("hls_master_key"),
+    posterKey: text("poster_key"),
+    thumbnailsVttKey: text("thumbnails_vtt_key"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

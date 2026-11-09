@@ -48,9 +48,9 @@ describe.runIf(run)("applyJobStatus (Postgres)", () => {
   it("ignores stale and duplicate events (at-least-once, unordered delivery)", async () => {
     const id = await newVideo();
     await applyJobStatus(db, ev(id, "probe", "SUCCEEDED", 5), REQUIRED);
-    expect(await applyJobStatus(db, ev(id, "probe", "RUNNING", 4), REQUIRED)).toBe("ignored-stale");
-    expect(await applyJobStatus(db, ev(id, "probe", "SUCCEEDED", 5), REQUIRED)).toBe("ignored-terminal");
-    expect(await applyJobStatus(db, ev(id, "probe", "FAILED", 6), REQUIRED)).toBe("ignored-terminal");
+    expect(await applyJobStatus(db, ev(id, "probe", "RUNNING", 4), REQUIRED)).toMatchObject({ outcome: "ignored-stale" });
+    expect(await applyJobStatus(db, ev(id, "probe", "SUCCEEDED", 5), REQUIRED)).toMatchObject({ outcome: "ignored-terminal" });
+    expect(await applyJobStatus(db, ev(id, "probe", "FAILED", 6), REQUIRED)).toMatchObject({ outcome: "ignored-terminal" });
     const rows = await db.select().from(jobs).where(eq(jobs.videoId, id));
     expect(rows).toHaveLength(1);
     expect(rows[0]!.state).toBe("SUCCEEDED");
@@ -76,6 +76,6 @@ describe.runIf(run)("applyJobStatus (Postgres)", () => {
   });
 
   it("reports unknown videos", async () => {
-    expect(await applyJobStatus(db, ev("00000000-0000-4000-8000-000000000000", "probe", "RUNNING", 1), REQUIRED)).toBe("unknown-video");
+    expect(await applyJobStatus(db, ev("00000000-0000-4000-8000-000000000000", "probe", "RUNNING", 1), REQUIRED)).toMatchObject({ outcome: "unknown-video" });
   });
 });

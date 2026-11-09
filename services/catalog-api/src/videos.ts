@@ -29,6 +29,8 @@ const videoOut = z.object({
   width: z.number().nullable(),
   height: z.number().nullable(),
   playbackUrl: z.string().nullable(),
+  posterUrl: z.string().nullable(),
+  thumbnailsVttUrl: z.string().nullable(),
   jobs: z
     .array(z.object({ task: z.string(), state: z.string(), attempts: z.number(), error: z.string().nullable() }))
     .optional(),
@@ -48,6 +50,8 @@ const toOut = (v: Video, publicBase: string, jobRows?: Job[]): z.infer<typeof vi
   width: v.width,
   height: v.height,
   playbackUrl: v.status === "READY" && v.hlsMasterKey ? `${publicBase}/${v.hlsMasterKey}` : null,
+  posterUrl: v.posterKey ? `${publicBase}/${v.posterKey}` : null,
+  thumbnailsVttUrl: v.thumbnailsVttKey ? `${publicBase}/${v.thumbnailsVttKey}` : null,
   jobs: jobRows?.map((j) => ({ task: j.task, state: j.state, attempts: j.attempts, error: j.error })),
   createdAt: v.createdAt.toISOString(),
   updatedAt: v.updatedAt.toISOString(),
@@ -185,6 +189,7 @@ export const videoRoutes =
         // duplicate event (consumers are idempotent), never to a lost one.
         await events.videoUploaded({
           videoId: v.id,
+          ownerId: v.ownerId,
           bucket: cfg.RAW_BUCKET,
           key: v.rawKey,
           sizeBytes: v.sizeBytes,

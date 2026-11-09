@@ -227,6 +227,33 @@ func TestProbeTranscodeAndRedelivery(t *testing.T) {
 			t.Errorf("object %s was rewritten on redelivery", k)
 		}
 	}
+
+	// thumbnails (same probed event, fan-out sibling of transcode)
+	th := &Thumbnail{Deps: d, ProcessedBucket: processedBucket}
+	pub.reset()
+	if err := th.Handle(ctx, msgOf(t, probed, 1)); err != nil {
+		t.Fatalf("thumbnail: %v", err)
+	}
+	thumbs := listKeys(t, st, videoID+"/thumbs/")
+	for _, k := range []string{"poster.jpg", "sprite.jpg", "sprite.vtt"} {
+		if _, ok := thumbs[videoID+"/thumbs/"+k]; !ok {
+			t.Errorf("missing thumbnail output %s", k)
+		}
+	}
+	vtt := filepath.Join(t.TempDir(), "sprite.vtt")
+	if err := st.Download(ctx, processedBucket, videoID+"/thumbs/sprite.vtt", vtt); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(vtt); bytes.Count(b, []byte("-->")) != 6 { // 6 s clip, 1 thumb/s
+		t.Errorf("sprite.vtt has %d cues, want 6:\n%s", bytes.Count(b, []byte("-->")), b)
+	}
+	pub.reset()
+	if err := th.Handle(ctx, msgOf(t, probed, 2)); err != nil {
+		t.Fatalf("redelivered thumbnail: %v", err)
+	}
+	if s := pub.statuses(); len(s) != 1 || s[0].State != events.Succeeded {
+		t.Fatalf("thumbnail redelivery statuses = %+v", s)
+	}
 }
 
 func TestCorruptUploadFailsWithReason(t *testing.T) {

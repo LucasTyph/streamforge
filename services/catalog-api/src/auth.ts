@@ -34,11 +34,11 @@ const credentials = z.object({
   email: z.string().email().max(254).transform((e) => e.toLowerCase()),
   password: z.string().min(8).max(200),
 });
-const userOut = z.object({ id: z.string(), email: z.string() });
+const userOut = z.object({ id: z.string(), email: z.string(), isAdmin: z.boolean() });
 const errorOut = z.object({ error: z.string() });
 
 export const authRoutes =
-  (db: Db, secureCookies: boolean): FastifyPluginAsyncZod =>
+  (db: Db, secureCookies: boolean, adminEmails: readonly string[] = []): FastifyPluginAsyncZod =>
   async (app) => {
     const startSession = async (reply: FastifyReply, u: { id: string; email: string }) => {
       const token = await reply.jwtSign({ sub: u.id, email: u.email }, { expiresIn: SESSION_TTL_S });
@@ -49,7 +49,7 @@ export const authRoutes =
         path: "/",
         maxAge: SESSION_TTL_S,
       });
-      return { id: u.id, email: u.email };
+      return { id: u.id, email: u.email, isAdmin: adminEmails.includes(u.email) };
     };
 
     app.post(
@@ -86,6 +86,6 @@ export const authRoutes =
     app.get(
       "/auth/me",
       { schema: { tags: ["auth"], response: { 200: userOut } }, preHandler: requireUser },
-      async (req) => ({ id: req.user.sub, email: req.user.email }),
+      async (req) => ({ id: req.user.sub, email: req.user.email, isAdmin: adminEmails.includes(req.user.email) }),
     );
   };

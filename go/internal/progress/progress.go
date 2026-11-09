@@ -1,5 +1,6 @@
-// Package progress publishes fine-grained, best-effort job progress to Redis pub/sub
-// (channel "progress:<videoId>"); progress-svc (M3) fans it out to browsers via SSE.
+// Package progress publishes fine-grained, best-effort job progress to Redis pub/sub on
+// the owner's channel ("progress:user:<ownerId>"); progress-svc fans it out via SSE.
+// catalog-api publishes video status changes on the same channel.
 package progress
 
 import (
@@ -12,7 +13,12 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+// Channel is the Redis channel carrying a user's live events.
+func Channel(ownerID string) string { return "progress:user:" + ownerID }
+
 type Event struct {
+	Kind    string  `json:"kind"` // always "progress"
+	OwnerID string  `json:"-"`
 	VideoID string  `json:"videoId"`
 	Task    string  `json:"task"`
 	Stage   string  `json:"stage"`
@@ -33,9 +39,10 @@ type Redis struct {
 }
 
 func (r *Redis) Report(ctx context.Context, e Event) {
-	if r == nil || r.Client == nil {
+	if r == nil || r.Client == nil || e.OwnerID == "" {
 		return
 	}
+	e.Kind = "progress"
 	key := e.VideoID + "/" + e.Task
 	r.mu.Lock()
 	if r.last == nil {
@@ -51,7 +58,7 @@ func (r *Redis) Report(ctx context.Context, e Event) {
 	b, _ := json.Marshal(e)
 	ctx, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
-	if err := r.Client.Publish(ctx, "progress:"+e.VideoID, b).Err(); err != nil {
+	if err := r.Client.Publish(ctx, Channel(e.OwnerID), b).Err(); err != nil {
 		r.Log.Debug("progress publish failed", "err", err) // best effort
 	}
 }

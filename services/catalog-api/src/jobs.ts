@@ -44,7 +44,9 @@ export function deriveVideoStatus(
   return current;
 }
 
-export type ApplyOutcome = "applied" | "ignored-stale" | "ignored-terminal" | "unknown-video";
+export type ApplyOutcome =
+  | { outcome: "applied"; ownerId: string; status: VideoStatus }
+  | { outcome: "ignored-stale" | "ignored-terminal" | "unknown-video" };
 
 /**
  * Applies one event atomically. The video row is locked so concurrent events for the same
@@ -55,12 +57,12 @@ export async function applyJobStatus(db: Db, e: JobStatusEvent, requiredTasks: r
   const at = new Date(e.at);
   return db.transaction(async (tx) => {
     const [video] = await tx.select().from(videos).where(eq(videos.id, e.videoId)).for("update");
-    if (!video) return "unknown-video";
+    if (!video) return { outcome: "unknown-video" };
 
     const existing = await tx.query.jobs.findFirst({ where: and(eq(jobs.videoId, e.videoId), eq(jobs.task, e.task)) });
-    if (existing?.lastEventAt && at < existing.lastEventAt) return "ignored-stale";
+    if (existing?.lastEventAt && at < existing.lastEventAt) return { outcome: "ignored-stale" };
     const next = nextJobState(existing?.state, e.state);
-    if (!next) return "ignored-terminal";
+    if (!next) return { outcome: "ignored-terminal" };
 
     const fields = {
       state: next,
@@ -92,7 +94,11 @@ export async function applyJobStatus(db: Db, e: JobStatusEvent, requiredTasks: r
     if (e.task === "transcode" && next === "SUCCEEDED" && typeof e.result?.master === "string") {
       patch.hlsMasterKey = e.result.master;
     }
+    if (e.task === "thumbnail" && next === "SUCCEEDED" && e.result) {
+      const r = e.result as { poster?: string; vtt?: string };
+      Object.assign(patch, { posterKey: r.poster ?? null, thumbnailsVttKey: r.vtt ?? null });
+    }
     await tx.update(videos).set(patch).where(eq(videos.id, e.videoId));
-    return "applied";
+    return { outcome: "applied", ownerId: video.ownerId, status };
   });
 }

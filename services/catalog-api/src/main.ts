@@ -2,6 +2,7 @@ import { buildApp } from "./app.js";
 import { createEvents, createStorage } from "./aws.js";
 import { loadConfig } from "./config.js";
 import { createDb, runMigrations } from "./db/index.js";
+import { createNotifier } from "./notify.js";
 import { startStatusConsumer } from "./status-consumer.js";
 
 const cfg = loadConfig();
@@ -10,7 +11,9 @@ await runMigrations(db);
 
 const app = await buildApp({ cfg, db, storage: createStorage(cfg), events: createEvents(cfg) });
 await app.listen({ host: "0.0.0.0", port: cfg.API_PORT });
+const notifier = await createNotifier(cfg.REDIS_URL, app.log);
 const stopConsumer = startStatusConsumer({
+  notifier,
   db,
   queueUrl: cfg.CATALOG_STATUS_QUEUE_URL,
   region: cfg.AWS_REGION,
@@ -27,6 +30,7 @@ for (const sig of ["SIGTERM", "SIGINT"] as const) {
     const force = setTimeout(() => process.exit(1), 10_000).unref();
     await stopConsumer(); // finish the in-flight batch; undeleted messages are redelivered
     await app.close(); // stops accepting, drains in-flight requests
+    await notifier.close();
     await sql.end({ timeout: 5 });
     clearTimeout(force);
     process.exit(0);

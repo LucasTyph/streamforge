@@ -16,6 +16,7 @@ import (
 type VideoUploaded struct {
 	Type        string `json:"type"`
 	VideoID     string `json:"videoId"`
+	OwnerID     string `json:"ownerId"` // routes live progress to the owner's SSE stream
 	Bucket      string `json:"bucket"`
 	Key         string `json:"key"`
 	SizeBytes   int64  `json:"sizeBytes"`
@@ -34,6 +35,7 @@ type Rendition struct {
 type VideoProbed struct {
 	Type            string      `json:"type"`
 	VideoID         string      `json:"videoId"`
+	OwnerID         string      `json:"ownerId"`
 	Bucket          string      `json:"bucket"`
 	Key             string      `json:"key"`
 	DurationSeconds float64     `json:"durationSeconds"`

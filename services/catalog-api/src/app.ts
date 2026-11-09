@@ -13,6 +13,7 @@ import {
   type ZodTypeProvider,
 } from "fastify-type-provider-zod";
 import type { Events, Storage } from "./aws.js";
+import { adminRoutes } from "./admin.js";
 import { SESSION_COOKIE, authRoutes } from "./auth.js";
 import type { Config } from "./config.js";
 import type { Db } from "./db/index.js";
@@ -73,7 +74,8 @@ export async function buildApp(deps: AppDeps, opts: FastifyServerOptions = {}) {
     }
   });
 
-  await app.register(authRoutes(db, cfg.NODE_ENV === "production"));
+  await app.register(authRoutes(db, cfg.NODE_ENV === "production", cfg.ADMIN_EMAILS));
+  await app.register(adminRoutes({ db, region: cfg.AWS_REGION, queuePrefix: cfg.QUEUE_PREFIX, adminEmails: cfg.ADMIN_EMAILS }));
   await app.register(videoRoutes({ db, storage: deps.storage, events: deps.events, cfg }));
   return app;
 }

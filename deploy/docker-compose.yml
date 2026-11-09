@@ -98,6 +98,33 @@ services:
     cpus: 2
     mem_limit: 1g
 
+  thumbnail-worker:
+    build: { context: ../go, dockerfile: Dockerfile.ffmpeg, args: { CMD: thumbnail } }
+    image: streamforge/thumbnail-worker:dev
+    environment:
+      <<: *worker-env
+      PROCESSED_BUCKET: streamforge-processed
+      THUMBNAIL_QUEUE_URL: http://elasticmq:9324/000000000000/streamforge-thumbnail
+    tmpfs: ["/work:size=256m,uid=65532,gid=65532"]
+    depends_on: [elasticmq, sns-shim, seaweedfs, redis]
+    stop_grace_period: 30s
+    cpus: 1
+    mem_limit: 384m
+
+  # Live progress over Server-Sent Events (go/cmd/progress)
+  progress-svc:
+    build: { context: ../go, args: { CMD: progress } }
+    image: streamforge/progress-svc:dev
+    environment:
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET}
+      WEB_ORIGIN: ${WEB_ORIGIN}
+      PORT: "4001"
+    ports: ["4001:4001"]
+    depends_on: [redis]
+    stop_grace_period: 25s
+    mem_limit: 64m
+
 volumes:
   pgdata:
   s3data:

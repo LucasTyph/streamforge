@@ -18,8 +18,8 @@ dev: dev-infra tf-local seed ## Full dev loop: infra in Docker, API + web on the
 dev-infra: env ## Start Postgres, Redis, SeaweedFS, ElasticMQ, sns-shim
 	pnpm install --frozen-lockfile
 	$(COMPOSE) up -d --build --wait --wait-timeout 120 postgres redis
-	$(COMPOSE) up -d --build seaweedfs elasticmq sns-shim probe-worker transcode-worker
-	@scripts/wait-for.sh http://localhost:8333/status http://localhost:9324/ http://localhost:9911/healthz
+	$(COMPOSE) up -d --build seaweedfs elasticmq sns-shim probe-worker transcode-worker thumbnail-worker progress-svc
+	@scripts/wait-for.sh http://localhost:8333/status http://localhost:9324/ http://localhost:9911/healthz http://localhost:4001/healthz
 
 tf-local: env ## Create buckets/topics/subscriptions on the emulators
 	$(LOAD_ENV) && cd infra/terraform/local && terraform init -input=false >/dev/null && \

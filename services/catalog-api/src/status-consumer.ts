@@ -3,6 +3,7 @@ import { DeleteMessageCommand, ReceiveMessageCommand, SQSClient } from "@aws-sdk
 import type { FastifyBaseLogger } from "fastify";
 import type { Db } from "./db/index.js";
 import { applyJobStatus, jobStatusEvent } from "./jobs.js";
+import type { Notifier } from "./notify.js";
 
 export interface StatusConsumerOptions {
   db: Db;
@@ -10,6 +11,7 @@ export interface StatusConsumerOptions {
   region: string;
   requiredTasks: readonly string[];
   log: FastifyBaseLogger;
+  notifier: Notifier;
 }
 
 export function startStatusConsumer(o: StatusConsumerOptions) {
@@ -19,8 +21,9 @@ export function startStatusConsumer(o: StatusConsumerOptions) {
   const handle = async (body: string) => {
     const parsed = jobStatusEvent.safeParse(JSON.parse(body));
     if (!parsed.success) throw new Error(`invalid job-status event: ${parsed.error.message}`);
-    const outcome = await applyJobStatus(o.db, parsed.data, o.requiredTasks);
-    o.log.info({ videoId: parsed.data.videoId, task: parsed.data.task, state: parsed.data.state, outcome }, "job status");
+    const res = await applyJobStatus(o.db, parsed.data, o.requiredTasks);
+    o.log.info({ videoId: parsed.data.videoId, task: parsed.data.task, state: parsed.data.state, outcome: res.outcome }, "job status");
+    if (res.outcome === "applied") await o.notifier.videoChanged(res.ownerId, parsed.data.videoId, res.status);
   };
 
   const loop = (async () => {

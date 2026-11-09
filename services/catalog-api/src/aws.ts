@@ -24,6 +24,7 @@ export interface Storage {
 
 export interface VideoUploadedEvent {
   videoId: string;
+  ownerId: string;
   bucket: string;
   key: string;
   sizeBytes: number;
