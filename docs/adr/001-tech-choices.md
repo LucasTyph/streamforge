@@ -31,7 +31,22 @@ Rules: no Bitnami charts/images, no MinIO, official upstream images, exact versi
 (no `latest`). Tool versions are pinned in this ADR once they are installed in WSL (M0 completion).
 
 ### Pinned tool versions
-_To be filled after installation inside WSL._
+Installed by `scripts/install-tools.sh` into `~/.local` (SHA-256 verified):
+
+| Tool | Version |
+|---|---|
+| Go | 1.27.3 |
+| Node.js (LTS) | 26.13.0 |
+| pnpm | 12.18.0 |
+| kubectl | 1.37.2 |
+| Helm | 4.3.1 |
+| k3d | 5.9.0 |
+| k6 | 2.3.0 |
+| jq | 1.8.2 |
+| Terraform | 1.17.1 |
+
+System packages from Ubuntu 24.04 apt: `make`, `ffmpeg`. Host: Windows 11 + WSL2 (Ubuntu 24.04, 10 GB / 6 CPU), Docker Desktop.
+`tflocal`/`awslocal` are not needed (see ADR-002).
 
 ## Consequences
 - Two languages (Go, TS) cost a little more tooling, but each fits its job: process control
