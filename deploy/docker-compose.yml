@@ -45,7 +45,7 @@ services:
     environment: *aws-env
     ports: ["8333:8333"]
     volumes: [s3data:/data]
-    mem_limit: 512m
+    mem_limit: 768m # observed ~480 MiB idle after M2 tests (docs/results.md)
 
   # SQS-compatible queue (ADR-002)
   elasticmq:

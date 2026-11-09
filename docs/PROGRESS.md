@@ -22,5 +22,16 @@
 
 **M1 complete (2026-11-09).** Deferred to M3: shadcn/ui (plain Tailwind for now).
 
-## M2–M7
+## M2 — Processing pipeline
+- [x] Shared Go worker loop (`internal/worker`): long polling, visibility heartbeats, backoff, give-up before DLQ, drain/release on SIGTERM
+- [x] probe-worker: ffprobe via presigned URL, validation (video stream, <= 5:00), rendition ladder, publishes `video-probed`
+- [x] transcode-worker: one ffmpeg run -> 360p/720p HLS (never upscales, 4 s segments, veryfast), master playlist written last as the commit marker, progress to Redis
+- [x] catalog-api: `jobs` table + state machine, `catalog-status` consumer, READY/FAILED aggregation with readable reasons, `playbackUrl`
+- [x] Tests: Go unit (media, consumer), Vitest unit + Postgres integration (state machine), Testcontainers (redelivery idempotency, corrupt upload, DLQ after 3 attempts)
+- [x] `scripts/gen-test-media.sh`, `scripts/upload-videos.mjs`
+- [x] Acceptance: 5 generated clips -> READY with fetchable HLS; corrupt and 6-minute files -> FAILED with reasons; SIGTERM mid-transcode -> released and finished on attempt 2 (2026-11-09)
+
+**M2 complete (2026-11-09).** The web UI only shows status so far; the player arrives in M3.
+
+## M3–M7
 Not started. See the build brief.

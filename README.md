@@ -4,7 +4,7 @@ Event-driven video processing platform: upload a video in the browser, and a pip
 autoscaling workers probes it, transcodes it to adaptive HLS, and generates thumbnails,
 with live progress in the UI.
 
-> **Status:** M1 (local foundation + upload) complete; M2 (processing pipeline) next. See [docs/PROGRESS.md](docs/PROGRESS.md).
+> **Status:** M2 (processing pipeline) complete; M3 (player, live progress, admin page) next. See [docs/PROGRESS.md](docs/PROGRESS.md).
 
 ## Stack
 Go workers · TypeScript/Fastify API · Next.js · Postgres · Redis · Kubernetes (k3d, Helm,
@@ -27,7 +27,9 @@ API docs: http://localhost:4000/docs. `make help` lists all targets.
 | Target | What it does |
 |---|---|
 | `make test` | Go + TypeScript unit tests |
-| `make test-integration` | Upload flow and SNS->SQS routing against the running stack |
+| `make media` | Generate deterministic test clips into `media/` |
+| `node scripts/upload-videos.mjs media/*.mp4` | Upload through the API and wait for READY/FAILED |
+| `make test-integration` | Testcontainers worker tests + upload flow and SNS->SQS routing against the running stack |
 | `make lint` | go vet/gofmt, tsc, terraform fmt |
 | `make down` / `make clean` | Stop the stack / also delete its data |
 
@@ -36,6 +38,7 @@ API docs: http://localhost:4000/docs. `make help` lists all targets.
 ## Limitations
 - Local SQS queues are declared in ElasticMQ's config, not Terraform (ADR-002).
 - ElasticMQ keeps messages in memory; restarting it drops in-flight messages.
+- Processed media is anonymously readable from the local S3 endpoint (production: CloudFront + signed cookies). See ADR-003.
 
 ## Docs
 - [Architecture Decision Records](docs/adr/)
