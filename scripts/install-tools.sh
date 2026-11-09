@@ -35,6 +35,7 @@ f=node-v$NODE_VERSION-linux-x64.tar.xz
 fetch https://nodejs.org/dist/v$NODE_VERSION/$f $f; fetch https://nodejs.org/dist/v$NODE_VERSION/SHASUMS256.txt node.sums
 verify $f "$(sum_from node.sums $f)"
 rm -rf "$OPT/node"; mkdir -p "$OPT/node"; tar -C "$OPT/node" --strip-components=1 -xJf $f
+export PATH="$OPT/node/bin:$BIN:$PATH"   # npm's shebang needs node on PATH
 "$OPT/node/bin/npm" install -g --silent pnpm@$PNPM_VERSION
 for b in node npm npx pnpm pnpx; do [ -e "$OPT/node/bin/$b" ] && ln -sf "$OPT/node/bin/$b" "$BIN/$b"; done
 
