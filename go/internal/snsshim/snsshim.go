@@ -76,7 +76,7 @@ func New(path, region, account string, sender Sender, log *slog.Logger) (*Server
 }
 
 type apiErr struct {
-	status     int
+	status    int
 	code, msg string
 }
 

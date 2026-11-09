@@ -40,9 +40,9 @@ provider "aws" {
 }
 
 module "pipeline" {
-  source                = "../modules/pipeline"
-  web_origins           = ["http://localhost:3000", "http://streamforge.localhost"]
-  manage_queues         = false # ElasticMQ ignores some attributes, see ADR-002
+  source        = "../modules/pipeline"
+  web_origins   = ["http://localhost:3000", "http://streamforge.localhost"]
+  manage_queues = false # ElasticMQ ignores some attributes, see ADR-002
 }
 
 output "pipeline" {

@@ -1,6 +1,6 @@
 # ADR-002: AWS emulation approach
 
-- **Status:** Accepted (some details to verify in M1)
+- **Status:** Accepted (updated after M1 verification)
 - **Date:** 2026-11-09
 
 ## Context
@@ -28,15 +28,23 @@ is a valid real-AWS design too (it avoids a duplicate S3 event). On real AWS, th
 Garage was considered for S3. SeaweedFS was chosen because it runs as one small process
 and supports multipart and presigned URLs out of the box.
 
-## To verify in M1 (record the results here)
-- S3 bucket CORS on SeaweedFS (needed for browser PUTs). If missing, route browser
-  uploads through a same-origin proxy path in dev and document it.
-- Terraform AWS provider against each emulator (`aws_s3_bucket`, `aws_sqs_queue` with
-  redrive, `aws_sns_topic`/`aws_sns_topic_subscription` against sns-shim). If a resource
-  can't be managed this way, create it with an init script, and keep Terraform as the
-  source of truth for real AWS.
-- KEDA `aws-sqs-queue` scaler against ElasticMQ with a custom endpoint (M6). Fallback:
-  Prometheus queue-depth exporter + KEDA `prometheus` scaler.
+## Verified in M1 (2026-11-09)
+| Check | Result |
+|---|---|
+| S3 bucket CORS on SeaweedFS 4.53 | **Works.** `aws_s3_bucket_cors_configuration` applies; preflight from an allowed origin returns `Access-Control-Expose-Headers: ETag`, other origins get 403. |
+| Presigned multipart upload on SeaweedFS | **Works**, with `requestChecksumCalculation: "WHEN_REQUIRED"` on the JS SDK v3 S3 client. The SDK default adds a CRC32 of the *empty* body to presigned URLs, which fails with `BadDigest`. Real S3 has the same issue, so this isn't an emulator workaround. |
+| Terraform `aws_s3_bucket*`, `aws_sns_topic`, `aws_sns_topic_subscription` | **Work** against SeaweedFS and sns-shim. A second `terraform plan` shows no changes. |
+| Terraform `aws_sqs_queue` against ElasticMQ 1.7.1 | **Does not work.** ElasticMQ doesn't store `MessageRetentionPeriod`, `MaximumMessageSize` or `SqsManagedSseEnabled`, so the provider's "attributes applied" waiter never succeeds (3-minute timeout). Deleting a queue also fails, because the provider doesn't recognise ElasticMQ's error code. |
+
+**Decision for SQS:** locally, queues and DLQs (`maxReceiveCount = 3`) are declared in
+`deploy/elasticmq/elasticmq.conf`, and the pipeline module runs with `manage_queues = false`
+(it still creates the SNS->SQS subscriptions from computed queue ARNs). On real AWS the same
+module creates the queues (`manage_queues = true`). `scripts/smoke-messaging.sh` checks that
+the two definitions agree: every topic reaches its queues, and every queue redrives to its DLQ.
+ElasticMQ keeps messages in memory, so restarting it drops in-flight messages (dev only).
+
+**Still open (M6):** KEDA `aws-sqs-queue` scaler against ElasticMQ with a custom endpoint.
+Fallback: a Prometheus queue-depth exporter and KEDA's `prometheus` scaler.
 
 ## Consequences
 - No account or token is needed to run the project.

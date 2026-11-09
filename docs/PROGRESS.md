@@ -12,11 +12,15 @@
 **M0 complete (2026-11-09).**
 
 ## M1 — Local foundation + upload
-- [ ] docker-compose: Postgres, Redis, SeaweedFS (S3), ElasticMQ (SQS), sns-shim
-- [ ] Verify emulator gaps (S3 CORS, presigned multipart, Terraform provider calls) and record in ADR-002
-- [ ] `infra/terraform/local`
-- [ ] catalog-api: auth, videos, presigned multipart, health, OpenAPI, migrations
-- [ ] Web: login + upload with chunked progress
+- [x] docker-compose: Postgres, Redis, SeaweedFS (S3), ElasticMQ (SQS), sns-shim (Go)
+- [x] Emulator gaps verified and recorded in ADR-002 (SQS queues declared in ElasticMQ config)
+- [x] `infra/terraform/modules/pipeline` + `infra/terraform/local`, applied with `make tf-local`, no drift
+- [x] catalog-api: auth (argon2id + JWT cookie), `POST /videos`, presigned parts, complete/abort, `GET /videos[/:id]`, `/healthz` `/readyz`, OpenAPI at `/docs`, Drizzle migrations
+- [x] Web: login/sign-up + upload page with per-chunk progress, retries, cancel; library table
+- [x] Tests: Go unit (sns-shim), Vitest unit (upload planning, hashing, upload pool/retry), integration (100 MB presigned flow + SNS->SQS event), `scripts/smoke-messaging.sh`
+- [x] Acceptance: signed in as the demo user in a browser and uploaded a 100 MB file; record shows `UPLOADED` (2026-11-09)
+
+**M1 complete (2026-11-09).** Deferred to M3: shadcn/ui (plain Tailwind for now).
 
 ## M2–M7
 Not started. See the build brief.

@@ -54,7 +54,7 @@ func TestFanOutRawAndEnvelope(t *testing.T) {
 		t.Fatalf("CreateTopic: %d %s", code, body)
 	}
 	call(t, s, url.Values{"Action": {"Subscribe"}, "TopicArn": {topic}, "Protocol": {"sqs"},
-		"Endpoint": {"arn:aws:sqs:us-east-1:000000000000:raw-q"},
+		"Endpoint":               {"arn:aws:sqs:us-east-1:000000000000:raw-q"},
 		"Attributes.entry.1.key": {"RawMessageDelivery"}, "Attributes.entry.1.value": {"true"}})
 	call(t, s, url.Values{"Action": {"Subscribe"}, "TopicArn": {topic}, "Protocol": {"sqs"},
 		"Endpoint": {"arn:aws:sqs:us-east-1:000000000000:env-q"}})
