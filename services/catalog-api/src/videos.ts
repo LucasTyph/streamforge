@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { z } from "zod";
 import type { Events, Storage } from "./aws.js";
@@ -229,7 +229,8 @@ export const videoRoutes =
           orderBy: desc(videos.createdAt),
           limit: 100,
         });
-        return { items: rows.map((v) => out(v)) };
+        const jobRows = rows.length ? await db.select().from(jobs).where(inArray(jobs.videoId, rows.map((r) => r.id))) : [];
+        return { items: rows.map((v) => out(v, jobRows.filter((j) => j.videoId === v.id))) };
       },
     );
 
