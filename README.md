@@ -4,7 +4,7 @@ Event-driven video processing platform: upload a video in the browser, and a pip
 autoscaling workers probes it, transcodes it to adaptive HLS, and generates thumbnails,
 with live progress in the UI.
 
-> **Status:** M3 (player, live progress, Ops page) complete apart from running the e2e test; M4 (containers + Kubernetes) next. See [docs/PROGRESS.md](docs/PROGRESS.md).
+> **Status:** M3 (player, live progress, Ops page) complete; M4 (containers + Kubernetes) next. See [docs/PROGRESS.md](docs/PROGRESS.md).
 
 ## Stack
 Go workers · TypeScript/Fastify API · Next.js · Postgres · Redis · Kubernetes (k3d, Helm,
@@ -30,7 +30,7 @@ API docs: http://localhost:4000/docs. `make help` lists all targets.
 | `make media` | Generate deterministic test clips into `media/` |
 | `node scripts/upload-videos.mjs media/*.mp4` | Upload through the API and wait for READY/FAILED |
 | `make test-integration` | Testcontainers worker tests + upload flow and SNS->SQS routing against the running stack |
-| `make test-e2e` | Playwright: upload -> READY -> plays (needs `make dev`) |
+| `make test-e2e` | Playwright: upload -> READY -> plays (needs `make dev`; one-time: `sudo env "PATH=$PATH" npx playwright install-deps chromium` in `apps/web`) |
 | `make lint` | go vet/gofmt, tsc, terraform fmt |
 | `make down` / `make clean` | Stop the stack / also delete its data |
 

@@ -2,7 +2,7 @@
 import { resolve } from "node:path";
 import { expect, type Page, test } from "@playwright/test";
 
-const media = (f: string) => resolve(__dirname, "../../../media", f);
+const media = (f: string) => resolve(import.meta.dirname, "../../../media", f); // package is ESM: no __dirname
 
 async function login(page: Page) {
   await page.goto("/login");

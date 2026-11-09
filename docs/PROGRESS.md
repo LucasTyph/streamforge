@@ -40,7 +40,9 @@
 - [x] UI: shadcn/ui, library grid with posters, video page with hls.js player, quality selector, scrub previews, empty/loading/error states, dark/light mode, responsive (checked at 375 px)
 - [x] Ops page: queue + DLQ depths, DLQ peek, redrive, recent failed jobs (`ADMIN_EMAILS`)
 - [x] Verified in a browser: playback, Auto quality, scrub preview tile, DLQ redrive of a failing message
-- [ ] Playwright e2e (`make test-e2e`) written; **blocked on system libraries for headless Chromium** (`sudo env "PATH=$PATH" npx playwright install-deps chromium`)
+- [x] Playwright e2e (`make test-e2e`): upload -> READY -> plays -> scrub preview; corrupt upload -> FAILED with reason. 2/2 passing in Chromium, 2 consecutive runs (2026-11-09). One-time setup: `sudo env "PATH=$PATH" npx playwright install-deps chromium`
+
+**M3 complete (2026-11-09).** Videos processed before M3 have no thumbnails (not backfilled).
 
 ## M4–M7
 Not started. See the build brief.
