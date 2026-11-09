@@ -7,7 +7,9 @@
 - [x] User installs WSL2 (Ubuntu) + Docker Desktop with WSL integration, sets `.wslconfig`
 - [x] Repo cloned into the WSL filesystem (`~/code/streamforge`)
 - [x] Dev tools installed and verified inside WSL (2026-11-09) (go, node LTS + pnpm, make, k3d, kubectl, helm, terraform, k6, ffmpeg, jq), versions pinned in ADR-001 and `scripts/install-tools.sh`
-- [ ] Docker Desktop WSL integration enabled for Ubuntu-24.04 (Ubuntu set as default WSL distro; Docker Desktop restart pending)
+- [x] Docker Desktop WSL integration working in Ubuntu-24.04 (Docker 29.9.3; Ubuntu set as default WSL distro)
+
+**M0 complete (2026-11-09).**
 
 ## M1 — Local foundation + upload
 - [ ] docker-compose: Postgres, Redis, SeaweedFS (S3), ElasticMQ (SQS), sns-shim

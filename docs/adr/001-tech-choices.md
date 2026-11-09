@@ -44,6 +44,8 @@ Installed by `scripts/install-tools.sh` into `~/.local` (SHA-256 verified):
 | k6 | 2.3.0 |
 | jq | 1.8.2 |
 | Terraform | 1.17.1 |
+| Docker (Desktop) | 29.9.3 |
+| Docker Compose | 5.7.0 |
 
 System packages from Ubuntu 24.04 apt: `make`, `ffmpeg`, `unzip`, `libatomic1` (needed by Node.js). Host: Windows 11 + WSL2 (Ubuntu 24.04, 10 GB / 6 CPU), Docker Desktop.
 `tflocal`/`awslocal` are not needed (see ADR-002).
