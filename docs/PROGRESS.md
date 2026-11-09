@@ -33,5 +33,14 @@
 
 **M2 complete (2026-11-09).** The web UI only shows status so far; the player arrives in M3.
 
-## M3–M7
+## M3 — Product polish
+- [x] thumbnail-worker: poster, sprite sheet, WebVTT scrub index (VTT written last); Testcontainers coverage incl. redelivery
+- [x] progress-svc (Go): SSE, HS256 cookie auth, Redis per-user channels ([ADR-004](adr/004-live-progress.md))
+- [x] Live per-stage progress in the UI (probing, transcoding %, thumbnails), status pushes from catalog-api
+- [x] UI: shadcn/ui, library grid with posters, video page with hls.js player, quality selector, scrub previews, empty/loading/error states, dark/light mode, responsive (checked at 375 px)
+- [x] Ops page: queue + DLQ depths, DLQ peek, redrive, recent failed jobs (`ADMIN_EMAILS`)
+- [x] Verified in a browser: playback, Auto quality, scrub preview tile, DLQ redrive of a failing message
+- [ ] Playwright e2e (`make test-e2e`) written; **blocked on system libraries for headless Chromium** (`sudo env "PATH=$PATH" npx playwright install-deps chromium`)
+
+## M4–M7
 Not started. See the build brief.

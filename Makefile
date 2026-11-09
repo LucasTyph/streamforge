@@ -3,7 +3,7 @@ SHELL := /bin/bash
 COMPOSE := docker compose --env-file .env -f deploy/docker-compose.yml
 LOAD_ENV := set -a && source .env && set +a
 
-.PHONY: test-go-integration media help env dev dev-infra tf-local seed down clean test test-integration smoke lint \
+.PHONY: test-go-integration test-e2e media help env dev dev-infra tf-local seed down clean test test-integration smoke lint \
         up up-lite demo load chaos tf-aws-validate
 
 help: ## List targets
@@ -45,6 +45,9 @@ test-integration: test-go-integration ## Integration tests (Testcontainers + run
 
 test-go-integration: ## Go worker tests with Testcontainers (SeaweedFS, ElasticMQ) and real ffmpeg
 	cd go && go test -tags integration -count=1 ./...
+
+test-e2e: media ## Playwright: upload -> READY -> plays (needs `make dev` running)
+	pnpm --filter @streamforge/web exec playwright test
 
 media: ## Generate deterministic test clips into media/
 	scripts/gen-test-media.sh
