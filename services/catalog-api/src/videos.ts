@@ -5,7 +5,7 @@ import type { Events, Storage } from "./aws.js";
 import { requireUser } from "./auth.js";
 import type { Config } from "./config.js";
 import type { Db } from "./db/index.js";
-import { type Video, videos } from "./db/schema.js";
+import { type Job, type Video, jobs, videos } from "./db/schema.js";
 import {
   UploadError,
   assertPartNumbers,
@@ -28,11 +28,15 @@ const videoOut = z.object({
   durationSeconds: z.number().nullable(),
   width: z.number().nullable(),
   height: z.number().nullable(),
+  playbackUrl: z.string().nullable(),
+  jobs: z
+    .array(z.object({ task: z.string(), state: z.string(), attempts: z.number(), error: z.string().nullable() }))
+    .optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
 
-const toOut = (v: Video): z.infer<typeof videoOut> => ({
+const toOut = (v: Video, publicBase: string, jobRows?: Job[]): z.infer<typeof videoOut> => ({
   id: v.id,
   title: v.title,
   filename: v.filename,
@@ -43,6 +47,8 @@ const toOut = (v: Video): z.infer<typeof videoOut> => ({
   durationSeconds: v.durationSeconds,
   width: v.width,
   height: v.height,
+  playbackUrl: v.status === "READY" && v.hlsMasterKey ? `${publicBase}/${v.hlsMasterKey}` : null,
+  jobs: jobRows?.map((j) => ({ task: j.task, state: j.state, attempts: j.attempts, error: j.error })),
   createdAt: v.createdAt.toISOString(),
   updatedAt: v.updatedAt.toISOString(),
 });
@@ -53,13 +59,15 @@ export interface VideoDeps {
   db: Db;
   storage: Storage;
   events: Events;
-  cfg: Pick<Config, "MAX_UPLOAD_BYTES" | "UPLOAD_PART_BYTES" | "RAW_BUCKET">;
+  cfg: Pick<Config, "MAX_UPLOAD_BYTES" | "UPLOAD_PART_BYTES" | "RAW_BUCKET" | "PROCESSED_PUBLIC_URL">;
 }
 
 export const videoRoutes =
   ({ db, storage, events, cfg }: VideoDeps): FastifyPluginAsyncZod =>
   async (app) => {
     app.addHook("preHandler", requireUser);
+    const base = cfg.PROCESSED_PUBLIC_URL.replace(/\/$/, "");
+    const out = (v: Video, jobRows?: Job[]) => toOut(v, base, jobRows);
 
     const load = async (id: string, ownerId: string) => {
       const v = await db.query.videos.findFirst({ where: and(eq(videos.id, id), eq(videos.ownerId, ownerId)) });
@@ -112,7 +120,7 @@ export const videoRoutes =
           })
           .returning();
         req.log.info({ videoId: id, sizeBytes, parts: plan.partCount }, "upload started");
-        return reply.code(201).send({ video: toOut(v!), upload: { uploadId, ...plan } });
+        return reply.code(201).send({ video: out(v!), upload: { uploadId, ...plan } });
       },
     );
 
@@ -157,7 +165,7 @@ export const videoRoutes =
       },
       async (req) => {
         const v = await load(req.params.id, req.user.sub);
-        if (v.status !== "UPLOADING") return toOut(v); // idempotent retry
+        if (v.status !== "UPLOADING") return out(v); // idempotent retry
         const uploadId = uploading(v);
         const { partCount } = planUpload(v.sizeBytes, cfg.UPLOAD_PART_BYTES, cfg.MAX_UPLOAD_BYTES);
         const parts = normalizeCompletedParts(req.body.parts, partCount);
@@ -188,7 +196,7 @@ export const videoRoutes =
           .where(and(eq(videos.id, v.id), eq(videos.status, "UPLOADING")))
           .returning();
         req.log.info({ videoId: v.id }, "upload completed");
-        return toOut(updated ?? (await load(v.id, req.user.sub)));
+        return out(updated ?? (await load(v.id, req.user.sub)));
       },
     );
 
@@ -203,7 +211,7 @@ export const videoRoutes =
           .set({ status: "FAILED", failureReason: "Upload was cancelled", uploadId: null, updatedAt: new Date() })
           .where(eq(videos.id, v.id))
           .returning();
-        return toOut(updated!);
+        return out(updated!);
       },
     );
 
@@ -216,13 +224,16 @@ export const videoRoutes =
           orderBy: desc(videos.createdAt),
           limit: 100,
         });
-        return { items: rows.map(toOut) };
+        return { items: rows.map((v) => out(v)) };
       },
     );
 
     app.get(
       "/videos/:id",
       { schema: { tags: ["videos"], params: idParams, response: { 200: videoOut } } },
-      async (req) => toOut(await load(req.params.id, req.user.sub)),
+      async (req) => {
+        const v = await load(req.params.id, req.user.sub);
+        return out(v, await db.select().from(jobs).where(eq(jobs.videoId, v.id)));
+      },
     );
   };

@@ -13,6 +13,14 @@ const schema = z.object({
   S3_PUBLIC_ENDPOINT: z.string().url().optional(),
   RAW_BUCKET: z.string(),
   VIDEO_UPLOADED_TOPIC_ARN: z.string(),
+  CATALOG_STATUS_QUEUE_URL: z.string().url(),
+  /** Tasks that must succeed before a video is READY (thumbnail joins in M3). */
+  REQUIRED_TASKS: z
+    .string()
+    .default("probe,transcode")
+    .transform((s) => s.split(",").map((t) => t.trim()).filter(Boolean)),
+  /** Browser-facing base URL of the processed bucket (a CDN in production). */
+  PROCESSED_PUBLIC_URL: z.string().url(),
   MAX_UPLOAD_BYTES: z.coerce.number().int().default(200 * 1024 * 1024),
   UPLOAD_PART_BYTES: z.coerce.number().int().min(5 * 1024 * 1024).default(8 * 1024 * 1024),
 });

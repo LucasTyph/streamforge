@@ -38,7 +38,7 @@ services:
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
-        printf '{"identities":[{"name":"dev","credentials":[{"accessKey":"%s","secretKey":"%s"}],"actions":["Admin","Read","Write","List","Tagging"]}]}' \
+        printf '{"identities":[{"name":"dev","credentials":[{"accessKey":"%s","secretKey":"%s"}],"actions":["Admin","Read","Write","List","Tagging"]},{"name":"anonymous","actions":["Read:streamforge-processed"]}]}' \
           "$$AWS_ACCESS_KEY_ID" "$$AWS_SECRET_ACCESS_KEY" > /tmp/s3.json
         exec weed server -dir=/data -s3 -s3.port=8333 -s3.config=/tmp/s3.json \
           -master.volumeSizeLimitMB=512 -volume.max=0 -ip.bind=0.0.0.0
@@ -67,6 +67,36 @@ services:
     volumes: [snsdata:/data]
     depends_on: [elasticmq]
     mem_limit: 32m
+
+  # Pipeline workers (go/cmd/*). Endpoints point at the emulators inside the compose network.
+  probe-worker:
+    build: { context: ../go, dockerfile: Dockerfile.ffmpeg, args: { CMD: probe } }
+    image: streamforge/probe-worker:dev
+    environment: &worker-env
+      <<: *aws-env
+      AWS_ENDPOINT_URL_S3: http://seaweedfs:8333
+      AWS_ENDPOINT_URL_SQS: http://elasticmq:9324
+      AWS_ENDPOINT_URL_SNS: http://sns-shim:9911
+      REDIS_URL: redis://redis:6379
+      JOB_STATUS_TOPIC_ARN: arn:aws:sns:us-east-1:000000000000:streamforge-job-status
+      VIDEO_PROBED_TOPIC_ARN: arn:aws:sns:us-east-1:000000000000:streamforge-video-probed
+      PROBE_QUEUE_URL: http://elasticmq:9324/000000000000/streamforge-probe
+    depends_on: [elasticmq, sns-shim, seaweedfs, redis]
+    stop_grace_period: 40s
+    mem_limit: 128m
+
+  transcode-worker:
+    build: { context: ../go, dockerfile: Dockerfile.ffmpeg, args: { CMD: transcode } }
+    image: streamforge/transcode-worker:dev
+    environment:
+      <<: *worker-env
+      PROCESSED_BUCKET: streamforge-processed
+      TRANSCODE_QUEUE_URL: http://elasticmq:9324/000000000000/streamforge-transcode
+    tmpfs: ["/work:size=1g,uid=65532,gid=65532"]
+    depends_on: [elasticmq, sns-shim, seaweedfs, redis]
+    stop_grace_period: 15s
+    cpus: 2
+    mem_limit: 1g
 
 volumes:
   pgdata:

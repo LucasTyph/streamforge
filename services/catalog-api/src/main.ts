@@ -2,6 +2,7 @@ import { buildApp } from "./app.js";
 import { createEvents, createStorage } from "./aws.js";
 import { loadConfig } from "./config.js";
 import { createDb, runMigrations } from "./db/index.js";
+import { startStatusConsumer } from "./status-consumer.js";
 
 const cfg = loadConfig();
 const { db, sql } = createDb(cfg.DATABASE_URL);
@@ -9,6 +10,13 @@ await runMigrations(db);
 
 const app = await buildApp({ cfg, db, storage: createStorage(cfg), events: createEvents(cfg) });
 await app.listen({ host: "0.0.0.0", port: cfg.API_PORT });
+const stopConsumer = startStatusConsumer({
+  db,
+  queueUrl: cfg.CATALOG_STATUS_QUEUE_URL,
+  region: cfg.AWS_REGION,
+  requiredTasks: cfg.REQUIRED_TASKS,
+  log: app.log,
+});
 
 let closing = false;
 for (const sig of ["SIGTERM", "SIGINT"] as const) {
@@ -17,6 +25,7 @@ for (const sig of ["SIGTERM", "SIGINT"] as const) {
     closing = true;
     app.log.info({ sig }, "shutting down");
     const force = setTimeout(() => process.exit(1), 10_000).unref();
+    await stopConsumer(); // finish the in-flight batch; undeleted messages are redelivered
     await app.close(); // stops accepting, drains in-flight requests
     await sql.end({ timeout: 5 });
     clearTimeout(force);

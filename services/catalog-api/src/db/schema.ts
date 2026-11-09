@@ -1,4 +1,4 @@
-import { bigint, index, integer, pgEnum, pgTable, real, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { bigint, index, integer, jsonb, pgEnum, pgTable, real, text, timestamp, unique, uuid } from "drizzle-orm/pg-core";
 
 export const videoStatus = pgEnum("video_status", ["UPLOADING", "UPLOADED", "PROCESSING", "READY", "FAILED"]);
 
@@ -27,11 +27,35 @@ export const videos = pgTable(
     durationSeconds: real("duration_seconds"),
     width: integer("width"),
     height: integer("height"),
+    hlsMasterKey: text("hls_master_key"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("videos_owner_created_idx").on(t.ownerId, t.createdAt)],
 );
 
+export const jobState = pgEnum("job_state", ["PENDING", "RUNNING", "SUCCEEDED", "FAILED"]);
+
+/** One row per (video, pipeline task). Updated only from job-status events. */
+export const jobs = pgTable(
+  "jobs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    videoId: uuid("video_id")
+      .notNull()
+      .references(() => videos.id, { onDelete: "cascade" }),
+    task: text("task").notNull(),
+    state: jobState("state").notNull().default("PENDING"),
+    attempts: integer("attempts").notNull().default(0),
+    error: text("error"),
+    result: jsonb("result").$type<Record<string, unknown>>(),
+    lastEventAt: timestamp("last_event_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [unique("jobs_video_task_uq").on(t.videoId, t.task)],
+);
+
 export type User = typeof users.$inferSelect;
+export type Job = typeof jobs.$inferSelect;
 export type Video = typeof videos.$inferSelect;

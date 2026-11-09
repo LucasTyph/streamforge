@@ -3,7 +3,7 @@ SHELL := /bin/bash
 COMPOSE := docker compose --env-file .env -f deploy/docker-compose.yml
 LOAD_ENV := set -a && source .env && set +a
 
-.PHONY: help env dev dev-infra tf-local seed down clean test test-integration smoke lint \
+.PHONY: test-go-integration media help env dev dev-infra tf-local seed down clean test test-integration smoke lint \
         up up-lite demo load chaos tf-aws-validate
 
 help: ## List targets
@@ -18,7 +18,7 @@ dev: dev-infra tf-local seed ## Full dev loop: infra in Docker, API + web on the
 dev-infra: env ## Start Postgres, Redis, SeaweedFS, ElasticMQ, sns-shim
 	pnpm install --frozen-lockfile
 	$(COMPOSE) up -d --build --wait --wait-timeout 120 postgres redis
-	$(COMPOSE) up -d --build seaweedfs elasticmq sns-shim
+	$(COMPOSE) up -d --build seaweedfs elasticmq sns-shim probe-worker transcode-worker
 	@scripts/wait-for.sh http://localhost:8333/status http://localhost:9324/ http://localhost:9911/healthz
 
 tf-local: env ## Create buckets/topics/subscriptions on the emulators
@@ -39,9 +39,15 @@ test: ## Unit tests (Go + TS)
 	cd go && go test ./...
 	pnpm -r test
 
-test-integration: ## Integration tests against the running dev stack (UPLOAD_TEST_MB=100 for the big one)
+test-integration: test-go-integration ## Integration tests (Testcontainers + running dev stack; UPLOAD_TEST_MB=100 for the big upload)
 	scripts/smoke-messaging.sh
 	$(LOAD_ENV) && pnpm --filter @streamforge/catalog-api test:integration
+
+test-go-integration: ## Go worker tests with Testcontainers (SeaweedFS, ElasticMQ) and real ffmpeg
+	cd go && go test -tags integration -count=1 ./...
+
+media: ## Generate deterministic test clips into media/
+	scripts/gen-test-media.sh
 
 smoke: ## Check SNS -> SQS routing and DLQ redrive on the dev stack
 	scripts/smoke-messaging.sh

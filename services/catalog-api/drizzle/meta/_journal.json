@@ -8,6 +8,13 @@
       "when": 1794246722779,
       "tag": "0000_wandering_hannibal_king",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1794248599264,
+      "tag": "0001_strange_true_believers",
+      "breakpoints": true
     }
   ]
 }
