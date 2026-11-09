@@ -1,0 +1,74 @@
+# Dev loop: infrastructure + emulators. API and web run on the host (`make dev`).
+# Run via the Makefile so ../.env is loaded: docker compose --env-file .env -f deploy/docker-compose.yml ...
+name: streamforge
+
+x-aws-env: &aws-env
+  AWS_REGION: ${AWS_REGION}
+  AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+  AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+
+services:
+  postgres:
+    image: postgres:18.6-alpine3.24
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports: ["5432:5432"]
+    volumes: [pgdata:/var/lib/postgresql]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 3s
+      retries: 20
+    mem_limit: 256m
+
+  redis:
+    image: redis:8.8.4-alpine3.23
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "48mb"]
+    ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      retries: 20
+    mem_limit: 64m
+
+  # S3-compatible object store (ADR-002). Credentials are generated from env at start.
+  seaweedfs:
+    image: chrislusf/seaweedfs:4.53
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        printf '{"identities":[{"name":"dev","credentials":[{"accessKey":"%s","secretKey":"%s"}],"actions":["Admin","Read","Write","List","Tagging"]}]}' \
+          "$$AWS_ACCESS_KEY_ID" "$$AWS_SECRET_ACCESS_KEY" > /tmp/s3.json
+        exec weed server -dir=/data -s3 -s3.port=8333 -s3.config=/tmp/s3.json \
+          -master.volumeSizeLimitMB=512 -volume.max=0 -ip.bind=0.0.0.0
+    environment: *aws-env
+    ports: ["8333:8333"]
+    volumes: [s3data:/data]
+    mem_limit: 512m
+
+  # SQS-compatible queue (ADR-002)
+  elasticmq:
+    image: softwaremill/elasticmq-native:1.7.1
+    ports: ["9324:9324", "9325:9325"]
+    volumes:
+      - ./elasticmq/elasticmq.conf:/opt/elasticmq.conf:ro
+    mem_limit: 128m
+
+  # Minimal SNS emulator that fans out to ElasticMQ (go/cmd/sns-shim)
+  sns-shim:
+    build: { context: ../go, args: { CMD: sns-shim } }
+    image: streamforge/sns-shim:dev
+    environment:
+      <<: *aws-env
+      AWS_ENDPOINT_URL_SQS: http://elasticmq:9324
+      STATE_FILE: /data/state.json
+    ports: ["9911:9911"]
+    volumes: [snsdata:/data]
+    depends_on: [elasticmq]
+    mem_limit: 32m
+
+volumes:
+  pgdata:
+  s3data:
+  snsdata:
