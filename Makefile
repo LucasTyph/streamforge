@@ -3,7 +3,7 @@ SHELL := /bin/bash
 COMPOSE := docker compose --env-file .env -f deploy/docker-compose.yml
 LOAD_ENV := set -a && source .env && set +a
 
-.PHONY: test-go-integration test-e2e media cluster platform secrets images deploy status help env dev dev-infra tf-local seed down clean test test-integration smoke lint \
+.PHONY: test-go-integration test-api-integration test-e2e media cluster platform secrets images deploy status help env dev dev-infra tf-local seed down clean test test-integration smoke lint \
         up up-lite demo load chaos tf-aws-validate argocd gitops-up gitops-owner security
 
 help: ## List targets
@@ -39,9 +39,18 @@ test: ## Unit tests (Go + TS)
 	cd go && go test ./...
 	pnpm -r test
 
-test-integration: test-go-integration ## Integration tests (Testcontainers + running dev stack; UPLOAD_TEST_MB=100 for the big upload)
-	scripts/smoke-messaging.sh
-	$(LOAD_ENV) && pnpm --filter @streamforge/catalog-api test:integration
+test-integration: test-go-integration test-api-integration ## Integration tests (Testcontainers + dev stack; UPLOAD_TEST_MB=100 for the big upload)
+
+# Routing and API tests read messages back from the pipeline queues, so the workers (which
+# would consume them first) are stopped for the duration and started again afterwards.
+# The 21 s wait outlasts their last 20 s long-poll: ElasticMQ can still hand a new message
+# to a receive whose client is already gone, hiding it for the visibility timeout.
+WORKERS := probe-worker transcode-worker thumbnail-worker
+STOP_WORKERS := $(COMPOSE) stop $(WORKERS) >/dev/null && sleep 21
+test-api-integration: ## SNS->SQS routing + catalog-api integration tests against the dev stack
+	$(STOP_WORKERS)
+	scripts/smoke-messaging.sh && $(LOAD_ENV) && pnpm --filter @streamforge/catalog-api test:integration; \
+	  rc=$$?; $(COMPOSE) start $(WORKERS) >/dev/null; exit $$rc
 
 test-go-integration: ## Go worker tests with Testcontainers (SeaweedFS, ElasticMQ) and real ffmpeg
 	cd go && go test -tags integration -count=1 ./...
@@ -52,8 +61,9 @@ test-e2e: media ## Playwright: upload -> READY -> plays (needs `make dev` runnin
 media: ## Generate deterministic test clips into media/
 	scripts/gen-test-media.sh
 
-smoke: ## Check SNS -> SQS routing and DLQ redrive on the dev stack
-	scripts/smoke-messaging.sh
+smoke: ## Check SNS -> SQS routing and DLQ redrive on the dev stack (workers paused)
+	$(STOP_WORKERS)
+	scripts/smoke-messaging.sh; rc=$$?; $(COMPOSE) start $(WORKERS) >/dev/null; exit $$rc
 
 lint: ## Static checks
 	cd go && go vet ./... && test -z "$$(gofmt -l .)"

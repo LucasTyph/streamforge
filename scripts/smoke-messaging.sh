@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Publishes to each SNS topic (sns-shim) and checks the message lands in every
 # subscribed SQS queue (ElasticMQ). Verifies that Terraform subscriptions and the
-# ElasticMQ queue config agree. Requires the compose stack + `make tf-local`.
+# ElasticMQ queue config agree. Requires the compose stack + `make tf-local`, with the
+# pipeline workers stopped (they would consume the messages first): use `make smoke`.
 set -euo pipefail
 SNS=${AWS_ENDPOINT_URL_SNS:-http://localhost:9911}
 SQS=${AWS_ENDPOINT_URL_SQS:-http://localhost:9324}

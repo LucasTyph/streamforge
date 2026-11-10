@@ -77,9 +77,8 @@ jobs:
         with: { terraform_version: 1.17.1, terraform_wrapper: false }
       - name: start emulators and create resources
         run: make dev-infra tf-local
-      - run: scripts/smoke-messaging.sh
-      - name: catalog-api integration tests (presigned multipart flow, job state machine)
-        run: set -a && . ./.env && set +a && pnpm --filter @streamforge/catalog-api test:integration
+      - name: SNS->SQS routing + catalog-api integration tests (workers paused)
+        run: make test-api-integration
       - if: failure()
         run: docker compose --env-file .env -f deploy/docker-compose.yml logs --tail 100
 
