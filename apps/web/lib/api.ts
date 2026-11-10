@@ -1,5 +1,18 @@
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 export const PROGRESS_URL = process.env.NEXT_PUBLIC_PROGRESS_URL ?? "http://localhost:4001";
+export const GRAFANA_URL = process.env.NEXT_PUBLIC_GRAFANA_URL ?? "http://grafana.streamforge.localhost";
+
+/** Grafana Explore URL showing one trace in Tempo (datasource uid "tempo"). */
+export function traceUrl(traceId: string) {
+  const panes = {
+    t: {
+      datasource: "tempo",
+      queries: [{ refId: "A", datasource: { type: "tempo", uid: "tempo" }, queryType: "traceql", query: traceId }],
+      range: { from: "now-7d", to: "now" },
+    },
+  };
+  return `${GRAFANA_URL}/explore?schemaVersion=1&panes=${encodeURIComponent(JSON.stringify(panes))}`;
+}
 
 export type VideoStatus = "UPLOADING" | "UPLOADED" | "PROCESSING" | "READY" | "FAILED";
 export type JobTask = "probe" | "transcode" | "thumbnail";
@@ -25,6 +38,7 @@ export interface Video {
   playbackUrl: string | null;
   posterUrl: string | null;
   thumbnailsVttUrl: string | null;
+  traceId: string | null;
   jobs?: Job[];
   createdAt: string;
   updatedAt: string;

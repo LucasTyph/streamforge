@@ -1,3 +1,5 @@
+import { startTracing } from "./telemetry.js";
+const stopTracing = startTracing(); // before the app is built, so request spans export
 import { buildApp } from "./app.js";
 import { createEvents, createStorage } from "./aws.js";
 import { loadConfig } from "./config.js";
@@ -31,6 +33,7 @@ for (const sig of ["SIGTERM", "SIGINT"] as const) {
     await stopConsumer(); // finish the in-flight batch; undeleted messages are redelivered
     await app.close(); // stops accepting, drains in-flight requests
     await notifier.close();
+    await stopTracing().catch(() => {});
     await sql.end({ timeout: 5 });
     clearTimeout(force);
     process.exit(0);

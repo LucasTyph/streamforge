@@ -1,4 +1,5 @@
 {{ include "sf-lib.defaultDeny" . }}
+{{ include "sf-lib.kedaAuth" . }}
 {{ include "sf-lib.workload" (dict "ctx" $ "name" "catalog-api" "c" .Values.catalogApi) }}
 {{ include "sf-lib.workload" (dict "ctx" $ "name" "web" "c" .Values.web) }}
 {{ include "sf-lib.workload" (dict "ctx" $ "name" "progress-svc" "c" .Values.progressSvc) }}

@@ -1,0 +1,1 @@
+ALTER TABLE "videos" ADD COLUMN "trace_id" text;

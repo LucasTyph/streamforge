@@ -69,6 +69,7 @@ elasticmq:
     limits: { memory: 192Mi }
   networkPolicy:
     from: [catalog-api, probe-worker, transcode-worker, thumbnail-worker, sns-shim]
+    fromNamespaces: [keda] # KEDA's SQS scaler reads queue depth
 
 snsShim:
   kind: StatefulSet

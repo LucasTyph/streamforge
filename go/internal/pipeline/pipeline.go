@@ -18,8 +18,20 @@ import (
 	"streamforge/internal/events"
 	"streamforge/internal/media"
 	"streamforge/internal/progress"
+	"streamforge/internal/telemetry"
 	"streamforge/internal/worker"
 )
+
+// step runs fn inside a child span named after a pipeline step.
+func step(ctx context.Context, name string, fn func(context.Context) error) error {
+	ctx, span := telemetry.Tracer("pipeline").Start(ctx, name)
+	defer span.End()
+	err := fn(ctx)
+	if err != nil {
+		span.RecordError(err)
+	}
+	return err
+}
 
 // ObjectStore is the storage subset the handlers use.
 type ObjectStore interface {
@@ -60,7 +72,7 @@ func (d *Deps) GiveUp(task string) func(context.Context, worker.Message, error) 
 			VideoID string `json:"videoId"`
 		}
 		if json.Unmarshal([]byte(m.Body), &ref) != nil || ref.VideoID == "" {
-			d.Log.Error("cannot report failure: message has no videoId", "body", truncate(m.Body, 200))
+			d.Log.ErrorContext(ctx, "cannot report failure: message has no videoId", "body", truncate(m.Body, 200))
 			return
 		}
 		reason, ok := media.IsInvalidInput(err)
@@ -68,7 +80,7 @@ func (d *Deps) GiveUp(task string) func(context.Context, worker.Message, error) 
 			reason = fmt.Sprintf("Processing failed after %d attempts", m.ReceiveCount)
 		}
 		if perr := d.status(ctx, ref.VideoID, task, events.Failed, m.ReceiveCount, reason, map[string]any{"detail": truncate(err.Error(), 500)}); perr != nil {
-			d.Log.Error("could not publish FAILED status", "videoId", ref.VideoID, "err", perr)
+			d.Log.ErrorContext(ctx, "could not publish FAILED status", "videoId", ref.VideoID, "err", perr)
 		}
 	}
 }
@@ -111,7 +123,7 @@ func (p *Probe) Handle(ctx context.Context, m worker.Message) error {
 	var stdout, stderr bytes.Buffer
 	cmd := exec.CommandContext(pctx, or(p.FFprobe, "ffprobe"), media.ProbeArgs(url)...)
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	if err := cmd.Run(); err != nil {
+	if err := step(pctx, "ffprobe", func(context.Context) error { return cmd.Run() }); err != nil {
 		if looksInvalid(stderr.String()) {
 			return worker.Permanent(&media.InvalidInputError{Reason: "The file is not a readable video"})
 		}
@@ -134,7 +146,7 @@ func (p *Probe) Handle(ctx context.Context, m worker.Message) error {
 	if err := p.Pub.Publish(ctx, p.VideoProbedTopic, probed); err != nil {
 		return fmt.Errorf("publish video-probed: %w", err)
 	}
-	log.Info("probed", "duration", info.DurationSeconds, "width", info.Width, "height", info.Height, "renditions", len(rs))
+	log.InfoContext(ctx, "probed", "duration", info.DurationSeconds, "width", info.Width, "height", info.Height, "renditions", len(rs))
 	p.Progress.Report(ctx, progress.Event{OwnerID: ev.OwnerID, VideoID: ev.VideoID, Task: "probe", Stage: "probing", Percent: 100})
 	return p.status(ctx, ev.VideoID, "probe", events.Succeeded, m.ReceiveCount, "", map[string]any{
 		"durationSeconds": info.DurationSeconds, "width": info.Width, "height": info.Height, "hasAudio": info.HasAudio,
@@ -172,7 +184,7 @@ func (t *Transcode) Handle(ctx context.Context, m worker.Message) error {
 		return err
 	}
 	if done {
-		log.Info("output already committed; skipping")
+		log.InfoContext(ctx, "output already committed; skipping")
 		return t.status(ctx, ev.VideoID, "transcode", events.Succeeded, m.ReceiveCount, "", result)
 	}
 	if err := t.status(ctx, ev.VideoID, "transcode", events.Running, m.ReceiveCount, "", nil); err != nil {
@@ -185,7 +197,7 @@ func (t *Transcode) Handle(ctx context.Context, m worker.Message) error {
 	}
 	defer os.RemoveAll(work)
 	src := filepath.Join(work, "source")
-	if err := t.Store.Download(ctx, ev.Bucket, ev.Key, src); err != nil {
+	if err := step(ctx, "download source", func(ctx context.Context) error { return t.Store.Download(ctx, ev.Bucket, ev.Key, src) }); err != nil {
 		return err
 	}
 	out := filepath.Join(work, "hls")
@@ -199,12 +211,16 @@ func (t *Transcode) Handle(ctx context.Context, m worker.Message) error {
 	report := func(f float64) {
 		t.Progress.Report(ctx, progress.Event{OwnerID: ev.OwnerID, VideoID: ev.VideoID, Task: "transcode", Stage: "transcoding", Percent: f * 100})
 	}
-	if err := t.runFFmpeg(ctx, media.TranscodeArgs(src, out, ev.Renditions, ev.HasAudio), ev.DurationSeconds, report); err != nil {
+	if err := step(ctx, "ffmpeg transcode", func(ctx context.Context) error {
+		return t.runFFmpeg(ctx, media.TranscodeArgs(src, out, ev.Renditions, ev.HasAudio), ev.DurationSeconds, report)
+	}); err != nil {
 		return err
 	}
-	log.Info("transcoded", "seconds", time.Since(start).Seconds())
+	log.InfoContext(ctx, "transcoded", "seconds", time.Since(start).Seconds())
 
-	if err := t.Store.UploadDir(ctx, t.ProcessedBucket, prefix, out, masterPlaylist); err != nil {
+	if err := step(ctx, "upload hls", func(ctx context.Context) error {
+		return t.Store.UploadDir(ctx, t.ProcessedBucket, prefix, out, masterPlaylist)
+	}); err != nil {
 		return err
 	}
 	result["transcodeSeconds"] = time.Since(start).Seconds()

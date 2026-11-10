@@ -5,20 +5,21 @@ package main
 import (
 	"context"
 	"errors"
-	"log/slog"
 	"net/http"
 	"os"
 	"sync/atomic"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/redis/go-redis/v9"
 
 	"streamforge/internal/app"
 	"streamforge/internal/sse"
+	"streamforge/internal/telemetry"
 )
 
 func main() {
-	log := slog.New(slog.NewJSONHandler(os.Stdout, nil)).With("service", "progress-svc")
+	log := telemetry.NewLogger("progress-svc")
 	ctx, stop := app.SignalContext()
 	defer stop()
 
@@ -31,6 +32,9 @@ func main() {
 	rdb := redis.NewClient(opt)
 
 	hub := sse.NewHub()
+	telemetry.Registry.MustRegister(prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+		Name: "streamforge_sse_clients", Help: "Connected Server-Sent Events clients.",
+	}, func() float64 { return float64(hub.Clients()) }))
 	go func() { // one pattern subscription for the whole process; reconnects automatically
 		ps := rdb.PSubscribe(context.Background(), "progress:user:*")
 		defer ps.Close()

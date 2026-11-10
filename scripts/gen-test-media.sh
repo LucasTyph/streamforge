@@ -2,6 +2,22 @@
 # Generates deterministic test clips with ffmpeg (testsrc2 + sine). No downloads.
 # Output: media/ (gitignored). Usage: scripts/gen-test-media.sh [outdir]
 set -euo pipefail
+
+# `gen-test-media.sh demo [N]`: N 720p clips of 20-45 s for the autoscaling demo (media/demo).
+if [ "${1:-}" = demo ]; then
+  n=${2:-20}; mkdir -p media/demo
+  for i in $(seq -w 1 "$n"); do
+    f=media/demo/demo-$i.mp4
+    [ -f "$f" ] && continue
+    secs=$(( 20 + (10#$i * 7) % 26 )) # deterministic spread over 20..45 s
+    ffmpeg -nostdin -loglevel error -f lavfi -i "testsrc2=size=1280x720:rate=30:duration=$secs" \
+      -f lavfi -i "sine=frequency=$(( 300 + 10#$i * 20 )):sample_rate=48000:duration=$secs" \
+      -c:v libx264 -preset ultrafast -pix_fmt yuv420p -c:a aac -b:a 96k -shortest "$f"
+    echo "generated $f (${secs}s)"
+  done
+  exit 0
+fi
+
 OUT=${1:-media}
 mkdir -p "$OUT"
 

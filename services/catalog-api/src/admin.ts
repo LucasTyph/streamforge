@@ -1,13 +1,5 @@
 // Ops endpoints: queue depths, DLQ inspection and redrive, recent failed jobs.
-import {
-  DeleteMessageBatchCommand,
-  GetQueueAttributesCommand,
-  GetQueueUrlCommand,
-  type Message,
-  ReceiveMessageCommand,
-  SendMessageBatchCommand,
-  SQSClient,
-} from "@aws-sdk/client-sqs";
+import { DeleteMessageBatchCommand, type Message, ReceiveMessageCommand, SendMessageBatchCommand } from "@aws-sdk/client-sqs";
 import { desc, eq } from "drizzle-orm";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
@@ -15,14 +7,11 @@ import { z } from "zod";
 import { requireUser } from "./auth.js";
 import type { Db } from "./db/index.js";
 import { jobs, videos } from "./db/schema.js";
-
-export const PIPELINE_QUEUES = ["probe", "transcode", "thumbnail", "catalog-status"] as const;
-type QueueName = (typeof PIPELINE_QUEUES)[number];
+import { PIPELINE_QUEUES, type QueueName, type QueueReader } from "./queues.js";
 
 export interface AdminDeps {
   db: Db;
-  region: string;
-  queuePrefix: string;
+  queues: QueueReader;
   adminEmails: readonly string[];
 }
 
@@ -32,32 +21,9 @@ const depth = z.object({ visible: z.number(), inFlight: z.number(), delayed: z.n
 const queueParams = z.object({ queue: z.enum(PIPELINE_QUEUES) });
 
 export const adminRoutes =
-  ({ db, region, queuePrefix, adminEmails }: AdminDeps): FastifyPluginAsyncZod =>
+  ({ db, queues, adminEmails }: AdminDeps): FastifyPluginAsyncZod =>
   async (app) => {
-    const sqs = new SQSClient({ region, requestHandler: { requestTimeout: 10_000, connectionTimeout: 3_000 } });
-    const urls = new Map<string, string>();
-    const url = async (name: string) => {
-      const full = queuePrefix + name;
-      if (!urls.has(full)) {
-        const out = await sqs.send(new GetQueueUrlCommand({ QueueName: full }));
-        urls.set(full, out.QueueUrl!);
-      }
-      return urls.get(full)!;
-    };
-    const depthOf = async (name: string) => {
-      const out = await sqs.send(
-        new GetQueueAttributesCommand({
-          QueueUrl: await url(name),
-          AttributeNames: ["ApproximateNumberOfMessages", "ApproximateNumberOfMessagesNotVisible", "ApproximateNumberOfMessagesDelayed"],
-        }),
-      );
-      const a = out.Attributes ?? {};
-      return {
-        visible: Number(a.ApproximateNumberOfMessages ?? 0),
-        inFlight: Number(a.ApproximateNumberOfMessagesNotVisible ?? 0),
-        delayed: Number(a.ApproximateNumberOfMessagesDelayed ?? 0),
-      };
-    };
+    const { sqs, url } = queues;
     const summarize = (m: Message) => {
       let body: Record<string, unknown> = {};
       try {
@@ -89,11 +55,7 @@ export const adminRoutes =
           response: { 200: z.object({ queues: z.array(z.object({ name: z.string(), main: depth, dlq: depth })) }) },
         },
       },
-      async () => ({
-        queues: await Promise.all(
-          PIPELINE_QUEUES.map(async (name) => ({ name, main: await depthOf(name), dlq: await depthOf(`${name}-dlq`) })),
-        ),
-      }),
+      async () => ({ queues: await queues.all() }),
     );
 
     app.get(

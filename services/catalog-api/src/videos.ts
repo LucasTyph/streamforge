@@ -6,6 +6,7 @@ import { requireUser } from "./auth.js";
 import type { Config } from "./config.js";
 import type { Db } from "./db/index.js";
 import { type Job, type Video, jobs, videos } from "./db/schema.js";
+import { traceIds } from "./telemetry.js";
 import {
   UploadError,
   assertPartNumbers,
@@ -31,6 +32,7 @@ const videoOut = z.object({
   playbackUrl: z.string().nullable(),
   posterUrl: z.string().nullable(),
   thumbnailsVttUrl: z.string().nullable(),
+  traceId: z.string().nullable(),
   jobs: z
     .array(z.object({ task: z.string(), state: z.string(), attempts: z.number(), error: z.string().nullable() }))
     .optional(),
@@ -52,6 +54,7 @@ const toOut = (v: Video, publicBase: string, jobRows?: Job[]): z.infer<typeof vi
   playbackUrl: v.status === "READY" && v.hlsMasterKey ? `${publicBase}/${v.hlsMasterKey}` : null,
   posterUrl: v.posterKey ? `${publicBase}/${v.posterKey}` : null,
   thumbnailsVttUrl: v.thumbnailsVttKey ? `${publicBase}/${v.thumbnailsVttKey}` : null,
+  traceId: v.traceId,
   jobs: jobRows?.map((j) => ({ task: j.task, state: j.state, attempts: j.attempts, error: j.error })),
   createdAt: v.createdAt.toISOString(),
   updatedAt: v.updatedAt.toISOString(),
@@ -187,6 +190,7 @@ export const videoRoutes =
 
         // Publish before flipping the status: a crash in between leads to a retry and a
         // duplicate event (consumers are idempotent), never to a lost one.
+        const otelCtx = req.opentelemetry().context;
         await events.videoUploaded({
           videoId: v.id,
           ownerId: v.ownerId,
@@ -194,10 +198,10 @@ export const videoRoutes =
           key: v.rawKey,
           sizeBytes: v.sizeBytes,
           contentType: v.contentType,
-        });
+        }, otelCtx);
         const [updated] = await db
           .update(videos)
-          .set({ status: "UPLOADED", uploadId: null, updatedAt: new Date() })
+          .set({ status: "UPLOADED", uploadId: null, updatedAt: new Date(), traceId: traceIds(otelCtx).trace_id ?? null })
           .where(and(eq(videos.id, v.id), eq(videos.status, "UPLOADING")))
           .returning();
         req.log.info({ videoId: v.id }, "upload completed");

@@ -2,6 +2,12 @@ global:
   registry: registry.localhost:5111
   imageTag: "" # set by `make up` (git SHA)
 
+  # `make up` enables this (traces to the collector, scrapes from Prometheus).
+  observability:
+    enabled: false
+    namespace: monitoring
+    otlpEndpoint: http://otel-collector.monitoring.svc.cluster.local:4318
+
 host: streamforge.localhost
 s3PublicUrl: http://s3.streamforge.localhost
 
@@ -39,8 +45,9 @@ workerEgress: &workerEgress
 
 catalogApi:
   image: { repository: streamforge/catalog-api }
-  replicas: 2
   port: 4000
+  metricsPort: 4000
+  hpa: { minReplicas: 2, maxReplicas: 4, cpu: 70 }
   env:
     <<: *awsEnv
     NODE_ENV: production
@@ -93,6 +100,7 @@ progressSvc:
   image: { repository: streamforge/progress-svc }
   replicas: 1
   port: 4001
+  metricsPort: 4001
   env:
     PORT: "4001"
     REDIS_URL: redis://redis:6379
@@ -110,7 +118,8 @@ progressSvc:
 
 probeWorker:
   image: { repository: streamforge/probe-worker }
-  replicas: 1
+  metricsPort: 8080
+  keda: { queue: streamforge-probe, maxReplicas: 2, targetPerReplica: 1 }
   env:
     <<: *workerEnv
     VIDEO_PROBED_TOPIC_ARN: arn:aws:sns:us-east-1:000000000000:streamforge-video-probed
@@ -126,7 +135,9 @@ probeWorker:
 
 transcodeWorker:
   image: { repository: streamforge/transcode-worker }
-  replicas: 1
+  metricsPort: 8080
+  # ~1 GiB and 2 CPUs each at peak: 4 fits the laptop budget
+  keda: { queue: streamforge-transcode, maxReplicas: 4, targetPerReplica: 1 }
   env:
     <<: *workerEnv
     TRANSCODE_QUEUE_URL: http://elasticmq:9324/000000000000/streamforge-transcode
@@ -141,7 +152,8 @@ transcodeWorker:
 
 thumbnailWorker:
   image: { repository: streamforge/thumbnail-worker }
-  replicas: 1
+  metricsPort: 8080
+  keda: { queue: streamforge-thumbnail, maxReplicas: 3, targetPerReplica: 2 }
   env:
     <<: *workerEnv
     THUMBNAIL_QUEUE_URL: http://elasticmq:9324/000000000000/streamforge-thumbnail

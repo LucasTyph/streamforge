@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, ArrowLeft, Check, Circle, Loader2, X } from "lucide-react";
+import { Activity, AlertTriangle, ArrowLeft, Check, Circle, Loader2, X } from "lucide-react";
 import Link from "next/link";
 import { use, useCallback, useEffect, useState } from "react";
 import { AppHeader } from "@/components/app-header";
@@ -8,7 +8,7 @@ import { Player } from "@/components/player";
 import { StatusBadge } from "@/components/status-badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import { ApiError, api, fmtBytes, fmtDuration, type Video } from "@/lib/api";
+import { ApiError, api, fmtBytes, fmtDuration, traceUrl, type Video } from "@/lib/api";
 import { useLive } from "@/lib/live";
 import { type Stage, stagesFor } from "@/lib/pipeline";
 import { useSession } from "@/lib/session";
@@ -145,6 +145,17 @@ export default function VideoPage({ params }: { params: Promise<{ id: string }> 
                       </div>
                     ))}
                   </dl>
+                  {video.traceId && (
+                    <a
+                      href={traceUrl(video.traceId)}
+                      target="_blank"
+                      rel="noreferrer"
+                      data-testid="trace-link"
+                      className="mt-4 inline-flex items-center gap-1.5 text-sm text-primary hover:underline"
+                    >
+                      <Activity className="size-4" /> View pipeline trace
+                    </a>
+                  )}
                 </CardContent>
               </Card>
             </div>

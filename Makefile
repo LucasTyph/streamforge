@@ -3,7 +3,7 @@ SHELL := /bin/bash
 COMPOSE := docker compose --env-file .env -f deploy/docker-compose.yml
 LOAD_ENV := set -a && source .env && set +a
 
-.PHONY: test-go-integration test-api-integration test-e2e media cluster platform secrets images deploy status help env dev dev-infra tf-local seed down clean test test-integration smoke lint \
+.PHONY: observability grafana-password demo test-go-integration test-api-integration test-e2e media cluster platform secrets images deploy status help env dev dev-infra tf-local seed down clean test test-integration smoke lint \
         up up-lite demo load chaos tf-aws-validate argocd gitops-up gitops-owner security
 
 help: ## List targets
@@ -80,41 +80,74 @@ ifndef TAG
 TAG := $(shell git rev-parse --short HEAD)$(shell git diff --quiet HEAD -- . ':!docs' || echo "-dev$$(date +%s)")
 endif
 CNPG_CHART_VERSION := 0.29.1
+KEDA_CHART_VERSION := 2.21.0
+KPS_CHART_VERSION  := 93.1.2
+LOKI_CHART_VERSION := 7.5.0
+TEMPO_CHART_VERSION := 3.2.1
+OTELCOL_CHART_VERSION := 0.178.3
 SECRETS   := deploy/helm/secrets.local.yaml
-HELM_SET  := --namespace $(NS) -f $(SECRETS) --set global.imageTag=$(TAG)
+OBS       ?= false
+HELM_SET  = --namespace $(NS) -f $(SECRETS) --set global.imageTag=$(TAG) --set global.observability.enabled=$(OBS)
 
 up-lite: cluster platform secrets images deploy ## App on k3d without observability (http://streamforge.localhost)
 	@printf "\n  StreamForge is up: http://streamforge.localhost  (demo@streamforge.local / demo-password)\n\n"
 
-up: up-lite ## Full stack on k3d (observability is added in M6)
-	@echo "Observability stack arrives in M6; 'make up' currently equals 'make up-lite'."
+up: OBS := true
+up: cluster platform secrets observability images deploy ## Full stack on k3d: app + autoscaling + metrics, logs, traces
+	@printf "\n  StreamForge: http://streamforge.localhost  (demo@streamforge.local / demo-password)\n"
+	@printf "  Grafana:     http://grafana.streamforge.localhost  (anonymous view; admin password: make grafana-password)\n"
+	@printf "  Try it:      make demo   (20 uploads -> watch 'StreamForge / Pipeline' scale 0 -> N -> 0)\n\n"
 
 cluster: ## Create the k3d cluster (1 server, 2 agents, registry) if missing
 	@k3d cluster list streamforge >/dev/null 2>&1 || k3d cluster create --config deploy/k3d/cluster.yaml
 	@kubectl config use-context k3d-streamforge >/dev/null
 
-platform: ## Install cluster operators (CloudNativePG)
+platform: ## Install cluster operators (CloudNativePG, KEDA)
 	helm repo add cnpg https://cloudnative-pg.github.io/charts >/dev/null 2>&1 || true
-	helm repo update cnpg >/dev/null
+	helm repo add kedacore https://kedacore.github.io/charts >/dev/null 2>&1 || true
+	helm repo update cnpg kedacore >/dev/null
 	helm upgrade --install cnpg cnpg/cloudnative-pg --version $(CNPG_CHART_VERSION) \
 	  --namespace cnpg-system --create-namespace --wait --timeout 5m \
 	  --set resources.requests.cpu=50m --set resources.requests.memory=64Mi --set resources.limits.memory=256Mi
+	helm upgrade --install keda kedacore/keda --version $(KEDA_CHART_VERSION) \
+	  --namespace keda --create-namespace --wait --timeout 5m -f observability/values/keda.yaml
+
+observability: ## Prometheus, Grafana, Alertmanager, Loki, Tempo, OTel Collector + StreamForge dashboards/alerts
+	helm repo add prometheus-community https://prometheus-community.github.io/helm-charts >/dev/null 2>&1 || true
+	helm repo add grafana https://grafana.github.io/helm-charts >/dev/null 2>&1 || true
+	helm repo add grafana-community https://grafana-community.github.io/helm-charts >/dev/null 2>&1 || true
+	helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts >/dev/null 2>&1 || true
+	helm repo update prometheus-community grafana grafana-community open-telemetry >/dev/null
+	kubectl create namespace monitoring --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+	@kubectl -n monitoring get secret grafana-admin >/dev/null 2>&1 || kubectl -n monitoring create secret generic grafana-admin \
+	  --from-literal=admin-user=admin --from-literal=admin-password="$$(openssl rand -hex 16)" >/dev/null
+	helm upgrade --install kps prometheus-community/kube-prometheus-stack --version $(KPS_CHART_VERSION) -n monitoring \
+	  -f observability/values/kube-prometheus-stack.yaml --wait --timeout 10m
+	helm upgrade --install loki grafana/loki --version $(LOKI_CHART_VERSION) -n monitoring -f observability/values/loki.yaml --wait --timeout 10m
+	helm upgrade --install tempo grafana-community/tempo --version $(TEMPO_CHART_VERSION) -n monitoring -f observability/values/tempo.yaml --wait --timeout 10m
+	helm upgrade --install otel-collector open-telemetry/opentelemetry-collector --version $(OTELCOL_CHART_VERSION) -n monitoring \
+	  -f observability/values/otel-collector.yaml --wait --timeout 10m
+	helm upgrade --install streamforge-observability observability/chart -n monitoring --wait
+
+grafana-password: ## Print the Grafana admin password
+	@kubectl -n monitoring get secret grafana-admin -o jsonpath='{.data.admin-password}' | base64 -d; echo
 
 secrets: ## Generate random local secrets into deploy/helm/secrets.local.yaml (gitignored)
 	@[ -f $(SECRETS) ] || { printf 's3:\n  accessKey: "sf%s"\n  secretKey: "%s"\njwtSecret: "%s"\n' \
 	  "$$(openssl rand -hex 6)" "$$(openssl rand -hex 24)" "$$(openssl rand -hex 32)" > $(SECRETS) && echo "created $(SECRETS)"; }
 
 images: ## Build all images and push them to the k3d registry (tag: $(TAG))
-	@set -e; build() { docker build -q -t $(REGISTRY)/streamforge/$$1:$(TAG) "$${@:2}" >/dev/null && docker push -q $(REGISTRY)/streamforge/$$1:$(TAG) >/dev/null && echo "pushed $$1:$(TAG)"; }; \
-	build sns-shim --build-arg CMD=sns-shim go & \
-	build progress-svc --build-arg CMD=progress go & \
-	build probe-worker -f go/Dockerfile.ffmpeg --build-arg CMD=probe go & \
-	build transcode-worker -f go/Dockerfile.ffmpeg --build-arg CMD=transcode go & \
-	build thumbnail-worker -f go/Dockerfile.ffmpeg --build-arg CMD=thumbnail go & \
-	build terraform-local infra/terraform & \
-	build catalog-api -f services/catalog-api/Dockerfile . & \
-	build web -f apps/web/Dockerfile . & \
-	wait
+	@build() { docker build -q -t $(REGISTRY)/streamforge/$$1:$(TAG) "$${@:2}" >/dev/null && docker push -q $(REGISTRY)/streamforge/$$1:$(TAG) >/dev/null && echo "pushed $$1:$(TAG)"; }; \
+	build sns-shim --build-arg CMD=sns-shim go & p1=$$!; \
+	build progress-svc --build-arg CMD=progress go & p2=$$!; \
+	build probe-worker -f go/Dockerfile.ffmpeg --build-arg CMD=probe go & p3=$$!; \
+	build transcode-worker -f go/Dockerfile.ffmpeg --build-arg CMD=transcode go & p4=$$!; \
+	build thumbnail-worker -f go/Dockerfile.ffmpeg --build-arg CMD=thumbnail go & p5=$$!; \
+	build terraform-local infra/terraform & p6=$$!; \
+	build catalog-api -f services/catalog-api/Dockerfile --build-arg APP_VERSION=$(TAG) . & p7=$$!; \
+	build web -f apps/web/Dockerfile . & p8=$$!; \
+	fail=0; for p in $$p1 $$p2 $$p3 $$p4 $$p5 $$p6 $$p7 $$p8; do wait $$p || fail=1; done; \
+	[ $$fail = 0 ] || { echo "image build failed"; exit 1; }
 
 deploy: ## helm upgrade --install both releases (deps, then app)
 	helm dependency build deploy/helm/streamforge-deps >/dev/null
@@ -130,8 +163,13 @@ status: ## Pods, ingress and resource usage on k3d
 down: ## Delete the k3d cluster (and stop the docker-compose dev stack)
 	-k3d cluster delete streamforge
 	$(COMPOSE) down
-demo load chaos: ## (M6/M7) Scaling demo, load tests, chaos
-	@echo "'make $@' arrives in M6/M7."; exit 1
+DEMO_N ?= 20
+demo: ## Upload DEMO_N (20) clips at once to the k3d stack; watch Grafana 'StreamForge / Pipeline'
+	scripts/gen-test-media.sh demo $(DEMO_N)
+	API_URL=http://streamforge.localhost/api node scripts/upload-videos.mjs --expect READY media/demo/*.mp4
+
+chaos load: ## (M7) Chaos and load tests (`load` cannot start a line: it is a make directive)
+	@echo "'make $@' arrives in M7."; exit 1
 
 # ---- GitOps (ArgoCD) ---------------------------------------------------------
 ARGOCD_CHART_VERSION := 10.17.1

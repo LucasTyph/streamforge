@@ -4,6 +4,8 @@ packages:
 saveExact: true
 allowBuilds:
   esbuild: true
+  # postinstall is only a version check; the library works without it
+  protobufjs: false
 # Install native optional deps (e.g. @node-rs/argon2) for both image architectures,
 # so Docker build stages can run natively and still produce arm64 images.
 supportedArchitectures:

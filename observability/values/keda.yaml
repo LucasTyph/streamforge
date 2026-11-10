@@ -1,0 +1,5 @@
+# KEDA (operator + metrics adapter), trimmed resources.
+resources:
+  operator: { requests: { cpu: 20m, memory: 64Mi }, limits: { memory: 256Mi } }
+  metricServer: { requests: { cpu: 20m, memory: 64Mi }, limits: { memory: 256Mi } }
+  webhooks: { requests: { cpu: 10m, memory: 32Mi }, limits: { memory: 128Mi } }

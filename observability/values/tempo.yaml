@@ -1,0 +1,11 @@
+# Tempo monolithic, local storage. Receives OTLP from the collector.
+fullnameOverride: tempo
+tempo:
+  retention: 48h
+  receivers:
+    otlp:
+      protocols:
+        http: { endpoint: "0.0.0.0:4318" }
+        grpc: { endpoint: "0.0.0.0:4317" }
+  resources: { requests: { cpu: 50m, memory: 128Mi }, limits: { memory: 512Mi } }
+persistence: { enabled: true, size: 2Gi }

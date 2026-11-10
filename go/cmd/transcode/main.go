@@ -4,6 +4,7 @@
 package main
 
 import (
+	"context"
 	"time"
 
 	"streamforge/internal/app"
@@ -20,7 +21,7 @@ func main() {
 	h := &pipeline.Transcode{Deps: rt.Deps, ProcessedBucket: app.MustEnv("PROCESSED_BUCKET")}
 	c := &worker.Consumer{
 		SQS: rt.SQS, QueueURL: app.MustEnv("TRANSCODE_QUEUE_URL"), Log: rt.Log,
-		Handle: h.Handle, OnGiveUp: rt.Deps.GiveUp("transcode"),
+		Task: "transcode", Handle: h.Handle, OnGiveUp: rt.Deps.GiveUp("transcode"),
 		// Heartbeats extend visibility while ffmpeg runs; a crashed worker's message
 		// reappears within 2 minutes.
 		Visibility: 120 * time.Second, HeartbeatInterval: 30 * time.Second,
@@ -28,5 +29,8 @@ func main() {
 		DrainTimeout: 5 * time.Second,
 	}
 	_ = c.Run(ctx)
+	flush, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = rt.Shutdown(flush)
 	rt.Log.Info("exited")
 }

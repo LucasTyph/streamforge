@@ -9,7 +9,9 @@ import {
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { PublishCommand, SNSClient } from "@aws-sdk/client-sns";
+import type { Context } from "@opentelemetry/api";
 import type { Config } from "./config.js";
+import { injectContext } from "./telemetry.js";
 import type { CompletedPart } from "./uploads.js";
 
 /** Object storage operations the API needs. Faked in unit tests. */
@@ -32,7 +34,8 @@ export interface VideoUploadedEvent {
 }
 
 export interface Events {
-  videoUploaded(e: VideoUploadedEvent): Promise<void>;
+  /** `ctx`: the trace this video's pipeline continues (the upload-complete request). */
+  videoUploaded(e: VideoUploadedEvent, ctx?: Context | null): Promise<void>;
 }
 
 const timeouts = { requestTimeout: 10_000, connectionTimeout: 3_000 };
@@ -91,12 +94,15 @@ export function createStorage(cfg: Config): Storage {
 export function createEvents(cfg: Config): Events {
   const sns = new SNSClient({ region: cfg.AWS_REGION, requestHandler: timeouts });
   return {
-    async videoUploaded(e) {
+    async videoUploaded(e, ctx) {
+      const trace = Object.fromEntries(
+        Object.entries(injectContext(ctx)).map(([k, v]) => [k, { DataType: "String", StringValue: v }]),
+      );
       await sns.send(
         new PublishCommand({
           TopicArn: cfg.VIDEO_UPLOADED_TOPIC_ARN,
           Message: JSON.stringify({ type: "video.uploaded", version: 1, ...e }),
-          MessageAttributes: { type: { DataType: "String", StringValue: "video.uploaded" } },
+          MessageAttributes: { type: { DataType: "String", StringValue: "video.uploaded" }, ...trace },
         }),
       );
     },

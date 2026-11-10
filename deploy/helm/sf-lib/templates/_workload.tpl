@@ -15,6 +15,12 @@ Component keys (all optional unless noted):
   terminationGracePeriodSeconds, podLabels,
   networkPolicy: {from: [component | "ingress"], ports: [int], to: [{name|cnpgCluster, port}], kubeApi: bool, allowSelf: bool}
   probes.tcp: true uses tcpSocket checks (for servers without an HTTP health endpoint)
+  metricsPort: port serving /metrics (Prometheus PodMonitor + NetworkPolicy from the monitoring namespace)
+  keda: {queue, maxReplicas, minReplicas, targetPerReplica, cooldownPeriod} -> ScaledObject on the SQS queue (replicas omitted)
+  hpa: {minReplicas, maxReplicas, cpu} -> CPU HorizontalPodAutoscaler (replicas omitted)
+  preStopSeconds: sleep before SIGTERM so endpoints drop the pod first (default 5 when port is set)
+  networkPolicy.fromNamespaces: [ns] -> extra ingress from whole namespaces (e.g. keda)
+global.observability: {enabled, namespace, otlpEndpoint} -> OTLP env + scrape/export NetworkPolicy rules
 */}}
 
 {{- define "sf-lib.labels" -}}
@@ -52,7 +58,9 @@ metadata:
   name: {{ $name }}
   labels: {{- $labels | nindent 4 }}
 spec:
+  {{- if not (or $c.keda $c.hpa) }}
   replicas: {{ $c.replicas | default 1 }}
+  {{- end }}
   {{- if eq $kind "StatefulSet" }}
   serviceName: {{ $name }}
   {{- end }}
@@ -65,6 +73,9 @@ spec:
       labels:
         {{- $labels | nindent 8 }}
         {{- with $c.podLabels }}{{ toYaml . | nindent 8 }}{{ end }}
+        {{- if $c.metricsPort }}
+        streamforge.io/metrics: "true"
+        {{- end }}
       annotations:
         checksum/values: {{ toJson $c | sha256sum | trunc 16 }}
     spec:
@@ -87,13 +98,25 @@ spec:
           {{- with $c.args }}
           args: {{ toYaml . | nindent 12 }}
           {{- end }}
-          {{- if $c.port }}
+          {{- if or $c.port $c.metricsPort }}
           ports:
+            {{- if $c.port }}
             - name: http
               containerPort: {{ $c.port }}
+            {{- end }}
+            {{- if and $c.metricsPort (ne (toString $c.metricsPort) (toString $c.port)) }}
+            - name: metrics
+              containerPort: {{ $c.metricsPort }}
+            {{- end }}
           {{- end }}
-          {{- if or $c.env $c.secretEnv }}
+          {{- $obs := ($ctx.Values.global | default dict).observability | default dict }}
+          {{- if or $c.env $c.secretEnv $obs.enabled }}
           env:
+            {{- if $obs.enabled }}
+            - { name: OTEL_EXPORTER_OTLP_ENDPOINT, value: {{ $obs.otlpEndpoint | quote }} }
+            - { name: OTEL_SERVICE_NAME, value: {{ $name | quote }} }
+            - { name: OTEL_RESOURCE_ATTRIBUTES, value: "deployment.environment={{ $ctx.Release.Namespace }}" }
+            {{- end }}
             {{- range $k, $v := $c.env }}
             - name: {{ $k }}
               value: {{ tpl (toString $v) $ctx | quote }}
@@ -118,6 +141,12 @@ spec:
             periodSeconds: 5
             timeoutSeconds: 3
             failureThreshold: 3
+          {{- end }}
+          {{- $preStop := $c.preStopSeconds | default (ternary 5 0 (not (empty $c.port))) }}
+          {{- if gt (int $preStop) 0 }}
+          lifecycle:
+            # Let the Service/ingress drop this endpoint before SIGTERM (no 5xx during rollouts).
+            preStop: { sleep: { seconds: {{ $preStop }} } }
           {{- end }}
           resources: {{- toYaml ($c.resources | default dict) | nindent 12 }}
           securityContext:
@@ -195,7 +224,52 @@ spec:
     matchLabels:
       app.kubernetes.io/name: {{ $name }}
 {{- end }}
-{{ include "sf-lib.networkPolicy" (dict "ctx" $ctx "name" $name "np" ($c.networkPolicy | default dict) "port" $c.port) }}
+{{- with $c.hpa }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ $name }}
+  labels: {{- $labels | nindent 4 }}
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: {{ $name }} }
+  minReplicas: {{ .minReplicas }}
+  maxReplicas: {{ .maxReplicas }}
+  metrics:
+    - type: Resource
+      resource: { name: cpu, target: { type: Utilization, averageUtilization: {{ .cpu | default 70 }} } }
+{{- end }}
+{{- with $c.keda }}
+{{- $sqs := printf "http://elasticmq.%s.svc.cluster.local:9324" $ctx.Release.Namespace }}
+---
+# Scales the worker on its queue depth (visible + in-flight), down to zero when idle.
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ $name }}
+  labels: {{- $labels | nindent 4 }}
+spec:
+  scaleTargetRef: { name: {{ $name }} }
+  minReplicaCount: {{ .minReplicas | default 0 }}
+  maxReplicaCount: {{ .maxReplicas }}
+  pollingInterval: {{ .pollingInterval | default 5 }}
+  cooldownPeriod: {{ .cooldownPeriod | default 60 }} # last replica -> 0 after this long without messages
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleUp: { stabilizationWindowSeconds: 0, policies: [{ type: Pods, value: 2, periodSeconds: 15 }] }
+        scaleDown: { stabilizationWindowSeconds: 60, policies: [{ type: Pods, value: 1, periodSeconds: 30 }] }
+  triggers:
+    - type: aws-sqs-queue
+      authenticationRef: { name: sqs-scaler }
+      metadata:
+        queueURL: {{ printf "%s/000000000000/%s" $sqs .queue | quote }}
+        queueLength: {{ .targetPerReplica | default 1 | quote }} # messages per replica
+        awsRegion: us-east-1
+        awsEndpoint: {{ $sqs | quote }}
+        scaleOnInFlight: "true" # a message being transcoded still needs its worker
+{{- end }}
+{{ include "sf-lib.networkPolicy" (dict "ctx" $ctx "name" $name "np" ($c.networkPolicy | default dict) "port" $c.port "metricsPort" $c.metricsPort) }}
 {{- end }}
 
 {{/* NetworkPolicy for one component; the namespace has a default-deny (sf-lib.defaultDeny). */}}
@@ -215,6 +289,20 @@ spec:
   ingress:
     {{- if $np.allowSelf }}
     - from: [{ podSelector: { matchLabels: { app.kubernetes.io/name: {{ .name }} } } }]
+    {{- end }}
+    {{- $obs := ($.ctx.Values.global | default dict).observability | default dict }}
+    {{- if and $obs.enabled $.metricsPort }}
+    - from: [{ namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: {{ $obs.namespace }} } } }]
+      ports: [{ protocol: TCP, port: {{ $.metricsPort }} }] # Prometheus scrape
+    {{- end }}
+    {{- range $np.fromNamespaces }}
+    - from: [{ namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: {{ . }} } } }]
+      {{- if or $np.ports $.port }}
+      ports:
+        {{- range ($np.ports | default (list $.port)) }}
+        - { protocol: TCP, port: {{ . }} }
+        {{- end }}
+      {{- end }}
     {{- end }}
     {{- range $np.from }}
     - from:
@@ -245,6 +333,10 @@ spec:
         {{- end }}
       ports: [{ protocol: TCP, port: {{ .port }} }]
     {{- end }}
+    {{- if $obs.enabled }}
+    - to: [{ namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: {{ $obs.namespace }} } } }]
+      ports: [{ protocol: TCP, port: 4318 }] # OTLP traces to the collector
+    {{- end }}
     {{- if $np.kubeApi }}
     - ports: [{ protocol: TCP, port: 443 }, { protocol: TCP, port: 6443 }] # Kubernetes API
     {{- end }}
@@ -262,4 +354,17 @@ spec:
     matchLabels:
       app.kubernetes.io/instance: {{ .Release.Name }}
   policyTypes: [Ingress, Egress]
+{{- end }}
+
+{{/* KEDA credentials for the SQS scaler (same keys the services use). */}}
+{{- define "sf-lib.kedaAuth" -}}
+---
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: sqs-scaler
+spec:
+  secretTargetRef:
+    - { parameter: awsAccessKeyID, name: streamforge-s3, key: accessKey }
+    - { parameter: awsSecretAccessKey, name: streamforge-s3, key: secretKey }
 {{- end }}

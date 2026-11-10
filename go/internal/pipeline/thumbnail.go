@@ -43,7 +43,7 @@ func (t *Thumbnail) Handle(ctx context.Context, m worker.Message) error {
 		return err
 	}
 	if done {
-		t.Log.Info("thumbnails already committed; skipping", "videoId", ev.VideoID)
+		t.Log.InfoContext(ctx, "thumbnails already committed; skipping", "videoId", ev.VideoID)
 		return t.status(ctx, ev.VideoID, "thumbnail", events.Succeeded, m.ReceiveCount, "", result)
 	}
 	if err := t.status(ctx, ev.VideoID, "thumbnail", events.Running, m.ReceiveCount, "", nil); err != nil {
@@ -68,11 +68,15 @@ func (t *Thumbnail) Handle(ctx context.Context, m worker.Message) error {
 		return err
 	}
 	plan := media.PlanSprite(ev.DurationSeconds, ev.Width, ev.Height)
-	if err := t.run(ctx, media.PosterArgs(src, filepath.Join(out, "poster.jpg"), ev.DurationSeconds, ev.Width)); err != nil {
+	if err := step(ctx, "ffmpeg poster", func(ctx context.Context) error {
+		return t.run(ctx, media.PosterArgs(src, filepath.Join(out, "poster.jpg"), ev.DurationSeconds, ev.Width))
+	}); err != nil {
 		return err
 	}
 	report(30)
-	if err := t.run(ctx, media.SpriteArgs(src, filepath.Join(out, "sprite.jpg"), plan)); err != nil {
+	if err := step(ctx, "ffmpeg sprite", func(ctx context.Context) error {
+		return t.run(ctx, media.SpriteArgs(src, filepath.Join(out, "sprite.jpg"), plan))
+	}); err != nil {
 		return err
 	}
 	report(90)
@@ -80,7 +84,9 @@ func (t *Thumbnail) Handle(ctx context.Context, m worker.Message) error {
 	if err := os.WriteFile(filepath.Join(out, spriteVTT), []byte(media.SpriteVTT(plan, ev.DurationSeconds, "sprite.jpg")), 0o644); err != nil {
 		return err
 	}
-	if err := t.Store.UploadDir(ctx, t.ProcessedBucket, prefix, out, spriteVTT); err != nil {
+	if err := step(ctx, "upload thumbnails", func(ctx context.Context) error {
+		return t.Store.UploadDir(ctx, t.ProcessedBucket, prefix, out, spriteVTT)
+	}); err != nil {
 		return err
 	}
 	report(100)

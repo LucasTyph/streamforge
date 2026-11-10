@@ -30,6 +30,8 @@ export const videos = pgTable(
     hlsMasterKey: text("hls_master_key"),
     posterKey: text("poster_key"),
     thumbnailsVttKey: text("thumbnails_vtt_key"),
+    /** Trace that carried this video through the pipeline (Tempo/Grafana link). */
+    traceId: text("trace_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

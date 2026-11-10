@@ -8,7 +8,7 @@ secrets: { create: false } # created out of band: scripts/gitops-secrets.sh
 # app chart
 host: prod.streamforge.localhost
 s3PublicUrl: http://s3.prod.streamforge.localhost
-catalogApi: { replicas: 1, pdb: { minAvailable: null, maxUnavailable: 1 } }
+catalogApi: { hpa: { minReplicas: 1, maxReplicas: 2, cpu: 70 }, pdb: { minAvailable: null, maxUnavailable: 1 } }
 web: { replicas: 1, pdb: { minAvailable: null, maxUnavailable: 1 } }
 
 # deps chart

@@ -17,6 +17,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"streamforge/internal/telemetry"
 )
 
 // ---- auth -------------------------------------------------------------------
@@ -130,6 +132,7 @@ func (s *Server) Routes() http.Handler {
 		w.Write([]byte("ok"))
 	})
 	mux.HandleFunc("GET /events", s.events)
+	mux.Handle("GET /metrics", telemetry.Handler())
 	return mux
 }
 

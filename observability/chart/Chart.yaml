@@ -1,0 +1,5 @@
+apiVersion: v2
+name: streamforge-observability
+description: StreamForge dashboards, alert rules and scrape config (on top of kube-prometheus-stack, Loki, Tempo)
+type: application
+version: 0.1.0

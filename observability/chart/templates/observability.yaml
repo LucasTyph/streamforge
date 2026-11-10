@@ -1,0 +1,66 @@
+# Dashboards: one ConfigMap per JSON file, picked up by Grafana's dashboard sidecar.
+{{- range $path, $_ := .Files.Glob "files/dashboards/*.json" }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dashboard-{{ base $path | trimSuffix ".json" }}
+  labels: { grafana_dashboard: "1" }
+data:
+  {{ base $path }}: |-
+{{ $.Files.Get $path | indent 4 }}
+{{- end }}
+---
+# Scrape every StreamForge pod that exposes a `metrics` port (or serves /metrics on `http`).
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: streamforge
+spec:
+  namespaceSelector: { any: true }
+  selector:
+    matchLabels: { app.kubernetes.io/part-of: streamforge, streamforge.io/metrics: "true" }
+  podMetricsEndpoints:
+    - port: metrics
+      path: /metrics
+      interval: 15s
+    - port: http
+      path: /metrics
+      interval: 15s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: streamforge
+spec:
+  groups:
+    - name: streamforge.pipeline
+      rules:
+        - alert: StreamForgeDLQNotEmpty
+          expr: sum by (namespace, queue) (max by (namespace, queue, pod) (streamforge_queue_messages{dlq="true"})) > 0
+          for: 1m
+          labels: { severity: warning }
+          annotations:
+            summary: "{{`{{ $labels.queue }}`}} DLQ has {{`{{ $value }}`}} message(s) in {{`{{ $labels.namespace }}`}}"
+            runbook: docs/runbooks/dlq-filling.md
+        - alert: StreamForgeTranscodeSlow
+          expr: histogram_quantile(0.95, sum by (namespace, le) (rate(streamforge_job_duration_seconds_bucket{task="transcode", outcome="success"}[10m]))) > 120
+          for: 5m
+          labels: { severity: warning }
+          annotations:
+            summary: "p95 transcode time is {{`{{ $value | humanizeDuration }}`}} in {{`{{ $labels.namespace }}`}}"
+            runbook: docs/runbooks/worker-stuck.md
+        - alert: StreamForgeWorkerCrashLooping
+          expr: increase(kube_pod_container_status_restarts_total{namespace=~"streamforge.*"}[10m]) > 3
+          labels: { severity: critical }
+          annotations:
+            summary: "{{`{{ $labels.pod }}`}} restarted {{`{{ $value }}`}} times in 10m"
+            runbook: docs/runbooks/worker-stuck.md
+        - alert: StreamForgeAPIErrorRate
+          expr: |
+            sum by (namespace) (rate(http_request_duration_seconds_count{status_code=~"5.."}[5m]))
+              / clamp_min(sum by (namespace) (rate(http_request_duration_seconds_count[5m])), 1e-9) > 0.05
+          for: 5m
+          labels: { severity: critical }
+          annotations:
+            summary: "catalog-api 5xx ratio is {{`{{ $value | humanizePercentage }}`}} in {{`{{ $labels.namespace }}`}}"

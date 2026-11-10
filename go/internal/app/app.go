@@ -22,6 +22,7 @@ import (
 	"streamforge/internal/pipeline"
 	"streamforge/internal/progress"
 	"streamforge/internal/storage"
+	"streamforge/internal/telemetry"
 )
 
 func Env(k, def string) string {
@@ -42,15 +43,17 @@ func MustEnv(k string) string {
 
 // Runtime holds the shared clients for a worker process.
 type Runtime struct {
-	Log  *slog.Logger
-	AWS  aws.Config
-	SQS  *sqs.Client
-	Deps pipeline.Deps
+	Log      *slog.Logger
+	Shutdown func(context.Context) error // flushes traces
+	AWS      aws.Config
+	SQS      *sqs.Client
+	Deps     pipeline.Deps
 }
 
 // New loads AWS config (honouring AWS_ENDPOINT_URL_<SERVICE>) and builds shared deps.
 func New(ctx context.Context, service string) *Runtime {
-	log := slog.New(slog.NewJSONHandler(os.Stdout, nil)).With("service", service)
+	log := telemetry.NewLogger(service)
+	shutdown := telemetry.Setup(ctx, service)
 	cfg, err := config.LoadDefaultConfig(ctx)
 	if err != nil {
 		log.Error("aws config", "err", err)
@@ -68,7 +71,7 @@ func New(ctx context.Context, service string) *Runtime {
 		rep = &progress.Redis{Client: redis.NewClient(opt), Log: log, MinInterval: 500 * time.Millisecond}
 	}
 	return &Runtime{
-		Log: log, AWS: cfg, SQS: sqs.NewFromConfig(cfg),
+		Log: log, Shutdown: shutdown, AWS: cfg, SQS: sqs.NewFromConfig(cfg),
 		Deps: pipeline.Deps{
 			Store:          storage.New(cfg),
 			Pub:            events.SNSPublisher{Client: sns.NewFromConfig(cfg)},
@@ -90,6 +93,7 @@ func SignalContext() (context.Context, context.CancelFunc) {
 func ServeHealth(ctx context.Context, log *slog.Logger) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("ok")) })
+	mux.Handle("/metrics", telemetry.Handler())
 	mux.HandleFunc("/readyz", func(w http.ResponseWriter, _ *http.Request) {
 		if ctx.Err() != nil {
 			http.Error(w, "shutting down", http.StatusServiceUnavailable)

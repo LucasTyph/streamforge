@@ -13,6 +13,11 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/aws/aws-sdk-go-v2/service/sqs/types"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
+
+	"streamforge/internal/telemetry"
 )
 
 // Message is what a handler sees.
@@ -20,6 +25,7 @@ type Message struct {
 	Body         string
 	ReceiveCount int // 1 on first delivery
 	ID           string
+	Attributes   map[string]string // string message attributes (e.g. traceparent)
 }
 
 // PermanentError means retrying cannot help: the message is deleted after OnGiveUp runs.
@@ -40,6 +46,7 @@ type SQSAPI interface {
 type Consumer struct {
 	SQS      SQSAPI
 	QueueURL string
+	Task     string // metrics/trace label: probe|transcode|thumbnail
 	Log      *slog.Logger
 	// Handle processes one message. nil => delete. PermanentError => OnGiveUp then delete.
 	// Any other error => retry later; on the last allowed attempt OnGiveUp runs and the
@@ -85,6 +92,7 @@ func (c *Consumer) Run(ctx context.Context) error {
 			WaitTimeSeconds:             20,
 			VisibilityTimeout:           int32(c.Visibility.Seconds()),
 			MessageSystemAttributeNames: []types.MessageSystemAttributeName{types.MessageSystemAttributeNameApproximateReceiveCount},
+			MessageAttributeNames:       []string{"All"}, // carries the trace context
 		})
 		if err != nil {
 			if ctx.Err() != nil {
@@ -103,16 +111,26 @@ func (c *Consumer) Run(ctx context.Context) error {
 }
 
 func (c *Consumer) process(pollCtx context.Context, raw types.Message) {
-	msg := Message{Body: aws.ToString(raw.Body), ID: aws.ToString(raw.MessageId), ReceiveCount: 1}
+	msg := Message{Body: aws.ToString(raw.Body), ID: aws.ToString(raw.MessageId), ReceiveCount: 1, Attributes: map[string]string{}}
 	if n, err := strconv.Atoi(raw.Attributes[string(types.MessageSystemAttributeNameApproximateReceiveCount)]); err == nil {
 		msg.ReceiveCount = n
 	}
-	log := c.Log.With("messageId", msg.ID, "receiveCount", msg.ReceiveCount)
-	// Independent of pollCtx so SIGTERM doesn't kill the job immediately.
-	jobCtx, cancelJob := context.WithCancel(context.Background())
+	for k, v := range raw.MessageAttributes {
+		if v.StringValue != nil {
+			msg.Attributes[k] = *v.StringValue
+		}
+	}
+	// Independent of pollCtx so SIGTERM doesn't kill the job immediately. The span
+	// continues the trace started by whoever published the message (API or upstream worker).
+	jobCtx, cancelJob := context.WithCancel(telemetry.Extract(context.Background(), msg.Attributes))
 	defer cancelJob()
+	jobCtx, span := telemetry.Tracer("worker").Start(jobCtx, c.Task+" process", trace.WithSpanKind(trace.SpanKindConsumer),
+		trace.WithAttributes(attribute.String("messaging.system", "aws_sqs"), attribute.String("messaging.message.id", msg.ID),
+			attribute.Int("messaging.receive_count", msg.ReceiveCount), attribute.String("streamforge.task", c.Task)))
+	defer span.End()
+	log := c.Log.With("messageId", msg.ID, "receiveCount", msg.ReceiveCount)
 	stopDrain := context.AfterFunc(pollCtx, func() {
-		log.Info("shutdown requested; draining in-flight message", "timeout", c.DrainTimeout)
+		log.InfoContext(jobCtx, "shutdown requested; draining in-flight message", "timeout", c.DrainTimeout)
 		t := time.AfterFunc(c.DrainTimeout, cancelJob)
 		context.AfterFunc(jobCtx, func() { t.Stop() })
 	})
@@ -121,40 +139,55 @@ func (c *Consumer) process(pollCtx context.Context, raw types.Message) {
 	hbDone := make(chan struct{})
 	go c.heartbeat(jobCtx, raw.ReceiptHandle, log, hbDone)
 
+	telemetry.JobsInFlight.WithLabelValues(c.Task).Inc()
 	start := time.Now()
 	err := c.Handle(jobCtx, msg)
+	elapsed := time.Since(start)
+	telemetry.JobsInFlight.WithLabelValues(c.Task).Dec()
 	cancelJob()
 	<-hbDone
 
-	// Bookkeeping must work even during shutdown.
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// Bookkeeping must work even during shutdown; keep the trace for log correlation.
+	ctx, cancel := context.WithTimeout(trace.ContextWithSpan(context.Background(), span), 10*time.Second)
 	defer cancel()
+	outcome := "success"
 	var perm *PermanentError
 	switch {
 	case err == nil:
-		log.Info("message processed", "ms", time.Since(start).Milliseconds())
+		log.InfoContext(ctx, "message processed", "ms", elapsed.Milliseconds())
 		c.delete(ctx, raw.ReceiptHandle, log)
 	case errors.As(err, &perm):
-		log.Warn("permanent failure", "err", err)
+		outcome = "failed"
+		log.WarnContext(ctx, "permanent failure", "err", err)
 		if c.OnGiveUp != nil {
 			c.OnGiveUp(ctx, msg, err)
 		}
 		c.delete(ctx, raw.ReceiptHandle, log)
 	case pollCtx.Err() != nil:
-		log.Info("released message for another worker", "err", err)
+		outcome = "released"
+		log.InfoContext(ctx, "released message for another worker", "err", err)
 		c.setVisibility(ctx, raw.ReceiptHandle, 0, log)
 	default:
 		if msg.ReceiveCount >= c.MaxReceiveCount {
-			log.Error("giving up; message will move to the DLQ", "err", err)
+			outcome = "failed"
+			log.ErrorContext(ctx, "giving up; message will move to the DLQ", "err", err)
 			if c.OnGiveUp != nil {
 				c.OnGiveUp(ctx, msg, err)
 			}
 			c.setVisibility(ctx, raw.ReceiptHandle, 0, log)
-			return
+			break
 		}
+		outcome = "retry"
 		backoff := c.RetryBackoff * time.Duration(msg.ReceiveCount)
-		log.Warn("attempt failed; will retry", "err", err, "retryIn", backoff)
+		log.WarnContext(ctx, "attempt failed; will retry", "err", err, "retryIn", backoff)
 		c.setVisibility(ctx, raw.ReceiptHandle, backoff, log)
+	}
+	telemetry.JobsTotal.WithLabelValues(c.Task, outcome).Inc()
+	telemetry.JobDuration.WithLabelValues(c.Task, outcome).Observe(elapsed.Seconds())
+	span.SetAttributes(attribute.String("streamforge.outcome", outcome))
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, outcome)
 	}
 }
 

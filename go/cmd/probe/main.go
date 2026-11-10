@@ -4,6 +4,7 @@
 package main
 
 import (
+	"context"
 	"time"
 
 	"streamforge/internal/app"
@@ -20,9 +21,12 @@ func main() {
 	h := &pipeline.Probe{Deps: rt.Deps, VideoProbedTopic: app.MustEnv("VIDEO_PROBED_TOPIC_ARN")}
 	c := &worker.Consumer{
 		SQS: rt.SQS, QueueURL: app.MustEnv("PROBE_QUEUE_URL"), Log: rt.Log,
-		Handle: h.Handle, OnGiveUp: rt.Deps.GiveUp("probe"),
+		Task: "probe", Handle: h.Handle, OnGiveUp: rt.Deps.GiveUp("probe"),
 		Visibility: 60 * time.Second, DrainTimeout: 30 * time.Second,
 	}
 	_ = c.Run(ctx)
+	flush, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = rt.Shutdown(flush)
 	rt.Log.Info("exited")
 }

@@ -4,7 +4,39 @@
 // Usage: node scripts/upload-videos.mjs [--expect READY|FAILED] file...
 // Env: API_URL (default http://localhost:4000), SEED_USER_EMAIL / SEED_USER_PASSWORD.
 import { open, stat } from "node:fs/promises";
+import { request } from "node:http";
 import { basename, extname } from "node:path";
+
+// fetch() that also reaches *.localhost hosts (the k3d ingress): browsers resolve them to
+// loopback, but glibc in WSL does not. Connect to 127.0.0.1 and keep the real Host header,
+// which presigned S3 URLs need (the signature covers the host).
+function xfetch(url, init = {}) {
+  const u = new URL(url);
+  if (!u.hostname.endsWith(".localhost")) return fetch(url, { signal: AbortSignal.timeout(60_000), ...init });
+  return new Promise((resolve, reject) => {
+    const req = request(
+      { host: "127.0.0.1", port: u.port || 80, path: u.pathname + u.search, method: init.method ?? "GET",
+        headers: { ...init.headers, host: u.host }, timeout: 60_000 },
+      (res) => {
+        const chunks = [];
+        res.on("data", (c) => chunks.push(c));
+        res.on("end", () => {
+          const body = Buffer.concat(chunks).toString();
+          resolve({
+            ok: res.statusCode >= 200 && res.statusCode < 300,
+            status: res.statusCode,
+            headers: { get: (h) => [].concat(res.headers[h.toLowerCase()] ?? [])[0] ?? null },
+            text: async () => body,
+            json: async () => JSON.parse(body),
+          });
+        });
+      },
+    );
+    req.on("timeout", () => req.destroy(new Error(`timeout: ${url}`)));
+    req.on("error", reject);
+    req.end(init.body);
+  });
+}
 
 const API = process.env.API_URL ?? "http://localhost:4000";
 const args = process.argv.slice(2);
@@ -17,11 +49,10 @@ if (!args.length) {
 
 let cookie = "";
 async function api(path, body) {
-  const res = await fetch(API + path, {
+  const res = await xfetch(API + path, {
     method: body ? "POST" : "GET",
     headers: { cookie, ...(body ? { "content-type": "application/json" } : {}) },
     body: body ? JSON.stringify(body) : undefined,
-    signal: AbortSignal.timeout(30_000),
   });
   const set = res.headers.get("set-cookie");
   if (set) cookie = set.split(";")[0];
@@ -49,7 +80,7 @@ async function uploadOne(file) {
         const len = Math.min(upload.partSize, size - start);
         const buf = Buffer.alloc(len);
         await fh.read(buf, 0, len, start);
-        const res = await fetch(url, { method: "PUT", body: buf });
+        const res = await xfetch(url, { method: "PUT", body: buf, headers: { "content-length": String(buf.length) } });
         if (!res.ok) throw new Error(`part ${partNumber}: ${res.status}`);
         return { partNumber, etag: res.headers.get("etag") };
       }),
@@ -68,9 +99,9 @@ async function waitFor({ id, file, uploadedAt }) {
       const secs = ((Date.now() - uploadedAt) / 1000).toFixed(1);
       let detail = v.status === "FAILED" ? `reason="${v.failureReason}"` : "";
       if (v.status === "READY") {
-        const master = await fetch(v.playbackUrl).then((r) => r.text());
+        const master = await xfetch(v.playbackUrl).then((r) => r.text());
         const variants = master.split("\n").filter((l) => l.endsWith(".m3u8"));
-        const first = await fetch(new URL(variants[0], v.playbackUrl)).then((r) => r.text());
+        const first = await xfetch(new URL(variants[0], v.playbackUrl).toString()).then((r) => r.text());
         const segs = first.split("\n").filter((l) => l.endsWith(".ts")).length;
         detail = `${v.width}x${v.height} ${v.durationSeconds?.toFixed(1)}s variants=[${variants.join(", ")}] segments(${variants[0]})=${segs}`;
       }

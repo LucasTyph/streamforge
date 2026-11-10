@@ -13,7 +13,11 @@ import {
   type ZodTypeProvider,
 } from "fastify-type-provider-zod";
 import type { Events, Storage } from "./aws.js";
+import { sql as dsql } from "drizzle-orm";
 import { adminRoutes } from "./admin.js";
+import { videos } from "./db/schema.js";
+import { createQueueReader } from "./queues.js";
+import { fastifyOtel, httpDuration, queueMessages, registry, traceIds, videosByStatus } from "./telemetry.js";
 import { SESSION_COOKIE, authRoutes } from "./auth.js";
 import type { Config } from "./config.js";
 import type { Db } from "./db/index.js";
@@ -36,6 +40,18 @@ export async function buildApp(deps: AppDeps, opts: FastifyServerOptions = {}) {
     bodyLimit: 1024 * 1024,
     ...opts,
   }).withTypeProvider<ZodTypeProvider>();
+
+  // Tracing first: one span per request; every request log line carries its trace id.
+  await app.register(fastifyOtel.plugin());
+  app.addHook("onRequest", async (req) => {
+    const ids = traceIds(req.opentelemetry().context);
+    if (ids.trace_id) req.log = req.log.child(ids);
+  });
+  app.addHook("onResponse", async (req, reply) => {
+    httpDuration
+      .labels({ method: req.method, route: req.routeOptions.url ?? "unmatched", status_code: String(reply.statusCode) })
+      .observe(reply.elapsedTime / 1000);
+  });
 
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);
@@ -77,7 +93,27 @@ export async function buildApp(deps: AppDeps, opts: FastifyServerOptions = {}) {
 
   const secureCookies = cfg.COOKIE_SECURE ? cfg.COOKIE_SECURE === "true" : cfg.NODE_ENV === "production";
   await app.register(authRoutes(db, secureCookies, cfg.ADMIN_EMAILS));
-  await app.register(adminRoutes({ db, region: cfg.AWS_REGION, queuePrefix: cfg.QUEUE_PREFIX, adminEmails: cfg.ADMIN_EMAILS }));
+  const queues = createQueueReader(cfg.AWS_REGION, cfg.QUEUE_PREFIX);
+  await app.register(adminRoutes({ db, queues, adminEmails: cfg.ADMIN_EMAILS }));
+
+  // Prometheus scrape: refresh queue depths and video counts (bounded), then render.
+  app.get("/metrics", { schema: { hide: true } }, async (req, reply) => {
+    const refresh = (async () => {
+      for (const q of await queues.all()) {
+        for (const [dlq, d] of [["false", q.main], ["true", q.dlq]] as const) {
+          queueMessages.labels({ queue: q.name, dlq, state: "visible" }).set(d.visible);
+          queueMessages.labels({ queue: q.name, dlq, state: "in_flight" }).set(d.inFlight);
+          queueMessages.labels({ queue: q.name, dlq, state: "delayed" }).set(d.delayed);
+        }
+      }
+      const rows = await db.select({ status: videos.status, n: dsql<number>`count(*)::int` }).from(videos).groupBy(videos.status);
+      videosByStatus.reset();
+      for (const r of rows) videosByStatus.labels({ status: r.status }).set(r.n);
+    })();
+    await Promise.race([refresh, new Promise((r) => setTimeout(r, 3000))]).catch((err) => req.log.warn({ err }, "metrics refresh failed"));
+    reply.header("Content-Type", registry.contentType);
+    return registry.metrics();
+  });
   await app.register(videoRoutes({ db, storage: deps.storage, events: deps.events, cfg }));
   return app;
 }

@@ -4,6 +4,7 @@
 package main
 
 import (
+	"context"
 	"time"
 
 	"streamforge/internal/app"
@@ -20,10 +21,13 @@ func main() {
 	h := &pipeline.Thumbnail{Deps: rt.Deps, ProcessedBucket: app.MustEnv("PROCESSED_BUCKET")}
 	c := &worker.Consumer{
 		SQS: rt.SQS, QueueURL: app.MustEnv("THUMBNAIL_QUEUE_URL"), Log: rt.Log,
-		Handle: h.Handle, OnGiveUp: rt.Deps.GiveUp("thumbnail"),
+		Task: "thumbnail", Handle: h.Handle, OnGiveUp: rt.Deps.GiveUp("thumbnail"),
 		Visibility: 120 * time.Second, HeartbeatInterval: 30 * time.Second,
 		DrainTimeout: 20 * time.Second,
 	}
 	_ = c.Run(ctx)
+	flush, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = rt.Shutdown(flush)
 	rt.Log.Info("exited")
 }
