@@ -4,3 +4,9 @@ packages:
 saveExact: true
 allowBuilds:
   esbuild: true
+# Install native optional deps (e.g. @node-rs/argon2) for both image architectures,
+# so Docker build stages can run natively and still produce arm64 images.
+supportedArchitectures:
+  os: [linux]
+  cpu: [x64, arm64]
+  libc: [glibc]

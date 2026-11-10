@@ -12,6 +12,9 @@ K3D_VERSION=5.9.0
 K6_VERSION=2.3.0
 JQ_VERSION=1.8.2
 TERRAFORM_VERSION=1.17.1
+GH_VERSION=2.103.3
+# Optional tools: `scripts/install-tools.sh gh` installs only the GitHub CLI.
+ONLY=${1:-}
 
 # apt prerequisites (need sudo, so we only check them)
 missing=""
@@ -32,6 +35,14 @@ fetch() { curl -fsSL --retry 3 -o "$2" "$1"; }
 verify() { [ -n "$2" ] && echo "$2  $1" | sha256sum -c --quiet - || { echo "checksum mismatch: $1" >&2; exit 1; }; }
 # sum_from <sums-file> <filename>
 sum_from() { awk -v f="$2" '{n=$2; sub(/^\*/,"",n); sub(/^.*\//,"",n)} n==f {print $1; exit}' "$1"; }
+
+install_gh() {
+  echo "gh $GH_VERSION"
+  local r=https://github.com/cli/cli/releases/download/v$GH_VERSION f=gh_${GH_VERSION}_linux_amd64.tar.gz
+  fetch $r/$f $f; fetch $r/gh_${GH_VERSION}_checksums.txt gh.sums
+  verify $f "$(sum_from gh.sums $f)"; tar -xzf $f; install -m755 gh_${GH_VERSION}_linux_amd64/bin/gh "$BIN/"
+}
+if [ "$ONLY" = gh ]; then install_gh; exit 0; fi
 
 echo "go $GO_VERSION"
 f=go$GO_VERSION.linux-amd64.tar.gz
@@ -77,6 +88,8 @@ r=https://releases.hashicorp.com/terraform/$TERRAFORM_VERSION; f=terraform_${TER
 fetch $r/$f $f; fetch $r/terraform_${TERRAFORM_VERSION}_SHA256SUMS tf.sums
 verify $f "$(sum_from tf.sums $f)"
 python3 -c "import zipfile,sys; zipfile.ZipFile(sys.argv[1]).extract('terraform','.')" $f; install -m755 terraform "$BIN/"
+
+install_gh
 
 # PATH for login shells
 grep -q 'streamforge-tools' "$HOME/.profile" || cat >> "$HOME/.profile" <<'P'

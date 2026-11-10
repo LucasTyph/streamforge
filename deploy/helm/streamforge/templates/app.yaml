@@ -5,6 +5,7 @@
 {{ include "sf-lib.workload" (dict "ctx" $ "name" "probe-worker" "c" .Values.probeWorker) }}
 {{ include "sf-lib.workload" (dict "ctx" $ "name" "transcode-worker" "c" .Values.transcodeWorker) }}
 {{ include "sf-lib.workload" (dict "ctx" $ "name" "thumbnail-worker" "c" .Values.thumbnailWorker) }}
+{{- if .Values.secrets.create }}
 ---
 apiVersion: v1
 kind: Secret
@@ -14,6 +15,7 @@ type: Opaque
 stringData:
   jwtSecret: {{ required "jwtSecret (make secrets)" .Values.jwtSecret | quote }}
   seedPassword: {{ .Values.seedUser.password | quote }}
+{{- end }}
 ---
 # One host: / -> web, /api -> catalog-api (prefix stripped), /events -> progress-svc (SSE).
 # Same origin, so the session cookie reaches the API and the event stream with no CORS.

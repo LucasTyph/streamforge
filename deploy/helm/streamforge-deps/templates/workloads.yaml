@@ -11,6 +11,7 @@ metadata:
 data:
   elasticmq.conf: |-
 {{ .Files.Get "files/elasticmq.conf" | indent 4 }}
+{{- if .Values.secrets.create }}
 ---
 apiVersion: v1
 kind: Secret
@@ -26,6 +27,7 @@ stringData:
       {"name":"streamforge","credentials":[{"accessKey":{{ .Values.s3.accessKey | quote }},"secretKey":{{ .Values.s3.secretKey | quote }}}],
        "actions":["Admin","Read","Write","List","Tagging"]},
       {"name":"anonymous","actions":["Read:streamforge-processed"]}]}
+{{- end }}
 ---
 # Browser-facing S3 endpoint: presigned uploads and HLS/thumbnail reads.
 apiVersion: networking.k8s.io/v1

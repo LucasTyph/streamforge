@@ -71,7 +71,8 @@ spec:
               terraform apply -auto-approve -input=false \
                 -var s3_endpoint=http://seaweedfs:8333 \
                 -var sns_endpoint=http://sns-shim:9911 \
-                -var sqs_endpoint=http://elasticmq:9324
+                -var sqs_endpoint=http://elasticmq:9324 \
+                -var 'web_origins={{ toJson .Values.webOrigins }}'
           env:
             - { name: HOME, value: /work }
             - { name: TF_IN_AUTOMATION, value: "1" }

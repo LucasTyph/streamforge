@@ -1,0 +1,135 @@
+# main -> build changed services (multi-arch) -> GHCR :<git sha> -> Trivy -> GitOps bump of
+# deploy/gitops/staging/images.yaml. ArgoCD then syncs staging to the new images.
+name: release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      all:
+        description: Build every image (bootstrap / rebuild)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-main # bumps must not race each other
+  cancel-in-progress: false
+
+jobs:
+  changes:
+    runs-on: ubuntu-24.04
+    outputs:
+      services: ${{ steps.pick.outputs.services }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        id: f
+        with:
+          filters: |
+            sns-shim: ['go/go.*', 'go/Dockerfile', 'go/cmd/sns-shim/**', 'go/internal/snsshim/**']
+            progress-svc: ['go/go.*', 'go/Dockerfile', 'go/cmd/progress/**', 'go/internal/sse/**', 'go/internal/app/**']
+            probe-worker: ['go/go.*', 'go/Dockerfile.ffmpeg', 'go/internal/**', 'go/cmd/probe/**']
+            transcode-worker: ['go/go.*', 'go/Dockerfile.ffmpeg', 'go/internal/**', 'go/cmd/transcode/**']
+            thumbnail-worker: ['go/go.*', 'go/Dockerfile.ffmpeg', 'go/internal/**', 'go/cmd/thumbnail/**']
+            catalog-api: ['services/catalog-api/**', 'pnpm-lock.yaml', 'pnpm-workspace.yaml']
+            web: ['apps/web/**', 'pnpm-lock.yaml', 'pnpm-workspace.yaml']
+            terraform-local: ['infra/terraform/Dockerfile', 'infra/terraform/local/**', 'infra/terraform/modules/**']
+      - id: pick
+        env:
+          ALL: ${{ inputs.all }}
+          CHANGED: ${{ steps.f.outputs.changes }}
+        run: |
+          if [ "$ALL" = "true" ]; then
+            echo 'services=["sns-shim","progress-svc","probe-worker","transcode-worker","thumbnail-worker","catalog-api","web","terraform-local"]' >> "$GITHUB_OUTPUT"
+          else
+            echo "services=$CHANGED" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    needs: changes
+    if: needs.changes.outputs.services != '[]'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJSON(needs.changes.outputs.services) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: build settings
+        id: cfg
+        env: { SVC: "${{ matrix.service }}" }
+        run: |
+          case "$SVC" in
+            sns-shim)         echo "context=go"; echo "file=go/Dockerfile";        echo "args=CMD=sns-shim" ;;
+            progress-svc)     echo "context=go"; echo "file=go/Dockerfile";        echo "args=CMD=progress" ;;
+            probe-worker)     echo "context=go"; echo "file=go/Dockerfile.ffmpeg"; echo "args=CMD=probe" ;;
+            transcode-worker) echo "context=go"; echo "file=go/Dockerfile.ffmpeg"; echo "args=CMD=transcode" ;;
+            thumbnail-worker) echo "context=go"; echo "file=go/Dockerfile.ffmpeg"; echo "args=CMD=thumbnail" ;;
+            catalog-api)      echo "context=.";  echo "file=services/catalog-api/Dockerfile"; echo "args=" ;;
+            web)              echo "context=.";  echo "file=apps/web/Dockerfile";  echo "args=" ;;
+            terraform-local)  echo "context=infra/terraform"; echo "file=infra/terraform/Dockerfile"; echo "args=" ;;
+          esac >> "$GITHUB_OUTPUT"
+          echo "image=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/streamforge/$SVC" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with: { registry: ghcr.io, username: "${{ github.actor }}", password: "${{ github.token }}" }
+      - uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        id: meta
+        with:
+          images: ${{ steps.cfg.outputs.image }}
+          tags: type=sha,format=short,prefix=
+          labels: org.opencontainers.image.title=${{ matrix.service }}
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ${{ steps.cfg.outputs.context }}
+          file: ${{ steps.cfg.outputs.file }}
+          build-args: ${{ steps.cfg.outputs.args }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          provenance: mode=max
+          sbom: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+      - name: trivy image scan
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ steps.meta.outputs.tags }}
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          version: v0.76.2
+      - name: record built tag
+        env: { SVC: "${{ matrix.service }}", TAG: "${{ steps.meta.outputs.version }}" }
+        run: mkdir -p built && echo "$TAG" > "built/$SVC"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with: { name: "built-${{ matrix.service }}", path: built/ }
+
+  gitops:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with: { pattern: built-*, merge-multiple: true, path: built }
+      - name: bump staging image tags
+        run: scripts/gitops-bump.sh deploy/gitops/staging/images.yaml built
+      - name: commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add deploy/gitops/staging/images.yaml
+          git diff --cached --quiet && { echo "nothing to bump"; exit 0; }
+          git commit -m "chore(gitops): deploy ${GITHUB_SHA::7} to staging [skip ci]"
+          git pull --rebase origin main && git push origin HEAD:main

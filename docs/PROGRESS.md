@@ -54,5 +54,15 @@
 
 **M4 complete (2026-11-09).** `make up` = `make up-lite` until observability lands in M6.
 
-## M5–M7
+## M5 — CI/CD + GitOps + IaC
+- [x] `ci.yml`: path-filtered Go/TS unit + integration (Testcontainers, compose emulators), Helm lint/render per env, Terraform fmt/validate/tflint/checkov, gitleaks, Trivy, actionlint; all actions pinned by SHA
+- [x] `release.yml`: changed services only, multi-arch (amd64 + arm64) to GHCR `:<sha>`, SBOM + provenance, Trivy gate, GitOps bump of staging tags
+- [x] `e2e.yml`: k3d in the runner, `make up-lite`, Playwright; `promote.yml`: manual staging -> prod
+- [x] ArgoCD app-of-apps (`deploy/argocd`): CNPG operator, staging + prod (deps wave 0, app wave 1), per-env values/images files ([ADR-006](adr/006-cicd-gitops.md))
+- [x] `infra/terraform/aws`: VPC, private EKS + IRSA, RDS, ElastiCache, KMS, hardened pipeline module; validate + tflint clean, checkov 420 passed / 0 failed (justified skips)
+- [x] Verified locally with the CI tool versions: `make tf-aws-validate`, `make security` (gitleaks, Trivy, actionlint), Helm strict lint + env renders, arm64 images built and smoke-tested
+- [ ] Create the GitHub repo and push (needs your OK); first CI + release runs
+- [ ] `make gitops-up` against the repo: ArgoCD syncs staging to the CI-built images
+
+## M6–M7
 Not started. See the build brief.

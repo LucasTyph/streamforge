@@ -1,6 +1,6 @@
 # catalog-api: build with pnpm in the monorepo, run on distroless Node (non-root).
 # Build from the repo root: docker build -f services/catalog-api/Dockerfile .
-FROM node:26.13.0-trixie-slim AS build
+FROM --platform=$BUILDPLATFORM node:26.13.0-trixie-slim AS build
 RUN npm install -g pnpm@12.18.0 >/dev/null
 WORKDIR /repo
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./

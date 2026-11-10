@@ -1,0 +1,18 @@
+# Prod, synced by ArgoCD from `main`; changes only via promote.yml (both Helm releases read this file).
+# Images come from GHCR; tags live in images.yaml (copied from staging by promote.yml).
+global:
+  registry: ghcr.io/OWNER # `make gitops-owner OWNER=<github user>`
+
+secrets: { create: false } # created out of band: scripts/gitops-secrets.sh
+
+# app chart
+host: prod.streamforge.localhost
+s3PublicUrl: http://s3.prod.streamforge.localhost
+catalogApi: { replicas: 1, pdb: { minAvailable: null, maxUnavailable: 1 } }
+web: { replicas: 1, pdb: { minAvailable: null, maxUnavailable: 1 } }
+
+# deps chart
+s3: { publicHost: s3.prod.streamforge.localhost }
+webOrigins: ["http://prod.streamforge.localhost"]
+postgres: { storage: 1Gi }
+seaweedfs: { persistence: { size: 2Gi, mountPath: /data } }

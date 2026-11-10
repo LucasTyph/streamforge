@@ -19,6 +19,12 @@ variable "sqs_endpoint" {
   default = "http://localhost:9324"
 }
 
+variable "web_origins" {
+  description = "Browser origins allowed by the buckets' CORS rules."
+  type        = list(string)
+  default     = ["http://localhost:3000", "http://streamforge.localhost"]
+}
+
 variable "sns_endpoint" {
   type    = string
   default = "http://localhost:9911"
@@ -40,9 +46,10 @@ provider "aws" {
 }
 
 module "pipeline" {
-  source        = "../modules/pipeline"
-  web_origins   = ["http://localhost:3000", "http://streamforge.localhost"]
-  manage_queues = false # ElasticMQ ignores some attributes, see ADR-002
+  source         = "../modules/pipeline"
+  web_origins    = var.web_origins
+  harden_buckets = false # SeaweedFS lacks public-access-block/versioning/lifecycle APIs
+  manage_queues  = false # ElasticMQ ignores some attributes, see ADR-002
 }
 
 output "pipeline" {

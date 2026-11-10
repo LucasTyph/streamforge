@@ -1,11 +1,12 @@
-# Go workers that shell out to ffmpeg/ffprobe. Usage: --build-arg CMD=probe|transcode
-FROM golang:1.27.3-alpine3.24 AS build
-ARG CMD
+# Go workers that shell out to ffmpeg/ffprobe. Usage: --build-arg CMD=probe|transcode|thumbnail
+# Multi-arch: Go cross-compiles natively; only the small Alpine stage runs per architecture.
+FROM --platform=$BUILDPLATFORM golang:1.27.3-alpine3.24 AS build
+ARG CMD TARGETOS TARGETARCH
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/app ./cmd/${CMD}
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /out/app ./cmd/${CMD}
 
 # Alpine's ffmpeg package is the smallest maintained build with libx264 + AAC.
 FROM alpine:3.24.4
@@ -16,4 +17,5 @@ COPY --from=build /out/app /usr/local/bin/app
 USER 65532:65532
 ENV WORK_DIR=/work HEALTH_PORT=8080
 EXPOSE 8080
+HEALTHCHECK --interval=10s --timeout=3s CMD ["wget", "-qO-", "http://127.0.0.1:8080/healthz"]
 ENTRYPOINT ["/usr/local/bin/app"]

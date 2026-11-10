@@ -1,0 +1,5 @@
+apiVersion: v2
+name: streamforge-apps
+description: App-of-apps - the platform operator plus deps and app releases per environment
+type: application
+version: 0.1.0

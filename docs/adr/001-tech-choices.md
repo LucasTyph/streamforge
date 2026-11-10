@@ -44,6 +44,7 @@ Installed by `scripts/install-tools.sh` into `~/.local` (SHA-256 verified):
 | k6 | 2.3.0 |
 | jq | 1.8.2 |
 | Terraform | 1.17.1 |
+| GitHub CLI (`gh`) | 2.103.3 |
 | Docker (Desktop) | 29.9.3 |
 | Docker Compose | 5.7.0 |
 

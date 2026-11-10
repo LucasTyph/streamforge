@@ -1,0 +1,32 @@
+# checkov config for the real-AWS Terraform. Every skip states why. Our own resources are
+# fixed or skipped inline; global skips only cover checkov limitations and module internals.
+framework: [terraform]
+download-external-modules: true
+skip-check:
+  # Registry modules are pinned to exact versions (vpc 6.7.3, eks 21.29.0, rds 7.2.2); the
+  # registry protocol has no commit-hash pinning.
+  - CKV_TF_1
+  # False positives: checkov does not follow values passed into modules. The DB/cache
+  # security groups are attached via module inputs; the EKS module's node SGs are attached
+  # to its launch templates.
+  - CKV2_AWS_5
+  # False positive: the VPC module's default security group is managed with no rules
+  # (manage_default_security_group + empty ingress/egress in main.tf).
+  - CKV2_AWS_12
+  # False positives on module internals: backups (backup_retention_period = 14, data.tf)
+  # and EKS secrets encryption (encryption_config with our KMS key, eks.tf) are set via inputs.
+  - CKV_AWS_133
+  - CKV_AWS_58
+  # False positive: the RDS master secret rotates every 30 days (master_user_password_rotation_automatically_after_days, data.tf).
+  - CKV_AWS_304
+  # Only hit by the EKS module's IPv6 CNI policy document, which this IPv4 cluster never
+  # creates; our IRSA policies are resource-scoped (irsa.tf) and pass.
+  - CKV_AWS_111
+  - CKV_AWS_356
+  # S3 trade-offs for this project (documented in README "What's not here"):
+  # server access logs -> CloudTrail S3 data events at the account level;
+  - CKV_AWS_18
+  # cross-region replication -> not required: processed media is reproducible from raw;
+  - CKV_AWS_144
+  # S3 event notifications -> catalog-api publishes video-uploaded itself (ADR-002).
+  - CKV2_AWS_62

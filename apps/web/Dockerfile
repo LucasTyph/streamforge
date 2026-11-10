@@ -2,7 +2,7 @@
 # Build from the repo root: docker build -f apps/web/Dockerfile .
 # NEXT_PUBLIC_* are inlined at build time; defaults suit the single-host ingress
 # (API at /api, live events at /events on the same origin).
-FROM node:26.13.0-trixie-slim AS build
+FROM --platform=$BUILDPLATFORM node:26.13.0-trixie-slim AS build
 RUN npm install -g pnpm@12.18.0 >/dev/null
 WORKDIR /repo
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./

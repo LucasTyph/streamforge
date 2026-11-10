@@ -1,0 +1,59 @@
+{{- define "apps.sync" -}}
+syncPolicy:
+  automated: { prune: true, selfHeal: true }
+  syncOptions: [CreateNamespace=true, ServerSideApply=true]
+  retry:
+    limit: 10
+    backoff: { duration: 15s, factor: 2, maxDuration: 5m }
+{{- end }}
+# Wave -1: cluster operators.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cnpg-operator
+  namespace: argocd
+  annotations: { argocd.argoproj.io/sync-wave: "-1" }
+  finalizers: [resources-finalizer.argocd.argoproj.io]
+spec:
+  project: default
+  source:
+    repoURL: https://cloudnative-pg.github.io/charts
+    chart: cloudnative-pg
+    targetRevision: {{ .Values.cnpg.chartVersion | quote }}
+    helm:
+      releaseName: cnpg
+      valuesObject:
+        resources:
+          requests: { cpu: 50m, memory: 64Mi }
+          limits: { memory: 256Mi }
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cnpg-system
+  {{- include "apps.sync" . | nindent 2 }}
+{{- range $i, $env := .Values.environments }}
+{{- range $r := list (dict "name" "deps" "chart" "streamforge-deps" "release" "streamforge-deps" "wave" 0) (dict "name" "app" "chart" "streamforge" "release" "streamforge" "wave" 1) }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: {{ $env.name }}-{{ $r.name }}
+  namespace: argocd
+  annotations: { argocd.argoproj.io/sync-wave: {{ $r.wave | quote }} }
+  finalizers: [resources-finalizer.argocd.argoproj.io]
+spec:
+  project: default
+  source:
+    repoURL: {{ $.Values.repoURL }}
+    targetRevision: {{ $.Values.targetRevision }}
+    path: deploy/helm/{{ $r.chart }}
+    helm:
+      releaseName: {{ $r.release }}
+      valueFiles:
+        - ../../gitops/{{ $env.name }}/values.yaml
+        - ../../gitops/{{ $env.name }}/images.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: {{ $env.namespace }}
+  {{- include "apps.sync" $ | nindent 2 }}
+{{- end }}
+{{- end }}

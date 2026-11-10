@@ -1,0 +1,48 @@
+# argo/argo-cd chart values for the local cluster (`make argocd`). Trimmed for the RAM
+# budget: no Dex, notifications or ApplicationSet controller.
+global:
+  domain: argocd.streamforge.localhost
+
+configs:
+  params:
+    server.insecure: true # TLS would terminate at the ingress in a real cluster
+  cm:
+    timeout.reconciliation: 60s
+    # Restore health assessment for child Applications, so app-of-apps sync waves wait
+    # for deps (wave 0) to be healthy before the app (wave 1).
+    resource.customizations.health.argoproj.io_Application: |
+      hs = {}
+      hs.status = "Progressing"
+      hs.message = ""
+      if obj.status ~= nil and obj.status.health ~= nil then
+        hs.status = obj.status.health.status
+        if obj.status.health.message ~= nil then hs.message = obj.status.health.message end
+      end
+      return hs
+
+dex: { enabled: false }
+notifications: { enabled: false }
+applicationSet: { replicas: 0 }
+
+server:
+  ingress:
+    enabled: true
+    ingressClassName: traefik
+  resources:
+    requests: { cpu: 20m, memory: 64Mi }
+    limits: { memory: 256Mi }
+
+repoServer:
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 512Mi }
+
+controller:
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 768Mi }
+
+redis:
+  resources:
+    requests: { cpu: 10m, memory: 32Mi }
+    limits: { memory: 128Mi }

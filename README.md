@@ -4,7 +4,7 @@ Event-driven video processing platform: upload a video in the browser, and a pip
 autoscaling workers probes it, transcodes it to adaptive HLS, and generates thumbnails,
 with live progress in the UI.
 
-> **Status:** M4 (containers + Kubernetes) complete; M5 (CI/CD, GitOps, AWS IaC) next. See [docs/PROGRESS.md](docs/PROGRESS.md).
+> **Status:** M5 (CI/CD, GitOps, AWS IaC) built and verified locally; GitHub repo + first CI run pending. See [docs/PROGRESS.md](docs/PROGRESS.md).
 
 ## Stack
 Go workers · TypeScript/Fastify API · Next.js · Postgres · Redis · Kubernetes (k3d, Helm,
@@ -41,6 +41,18 @@ make up-lite    # k3d cluster + CloudNativePG + images + Helm releases (~10 min 
 Then open http://streamforge.localhost (demo user as above). `make status` shows pods and
 resource usage; `make down` deletes the cluster. Stop the compose dev stack first
 (`make dev-down`) to stay within the RAM budget. Design notes: [ADR-005](docs/adr/005-kubernetes.md).
+
+## CI/CD and GitOps
+GitHub Actions test, scan and build every change; merges to `main` publish multi-arch
+images to GHCR and bump the staging tags in git; ArgoCD keeps the cluster in sync
+([ADR-006](docs/adr/006-cicd-gitops.md)).
+```bash
+make gitops-owner OWNER=<github user>   # once: point GitOps files at your repo/GHCR
+make gitops-up                          # k3d + ArgoCD + staging/prod following main
+```
+The real-AWS Terraform (`infra/terraform/aws`) is validated, linted and checkov-scanned
+but never applied ([README](infra/terraform/aws/README.md)). `make tf-aws-validate` and
+`make security` run the same checks locally.
 
 ## Limitations
 - Local SQS queues are declared in ElasticMQ's config, not Terraform (ADR-002).

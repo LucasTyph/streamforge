@@ -2,6 +2,14 @@ global:
   registry: registry.localhost:5111
   imageTag: "" # set by `make up` (git SHA)
 
+# Browser origins for the buckets' CORS rules (passed to the Terraform Job).
+webOrigins: ["http://localhost:3000", "http://streamforge.localhost"]
+
+# create: false -> the Secret `streamforge-s3` (accessKey, secretKey, s3.json) is created
+# out of band (GitOps: scripts/gitops-secrets.sh), so no secret values live in git.
+secrets:
+  create: true
+
 # Secret values come from the gitignored deploy/helm/secrets.local.yaml (`make secrets`).
 s3:
   accessKey: ""

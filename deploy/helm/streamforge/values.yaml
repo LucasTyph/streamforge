@@ -5,6 +5,11 @@ global:
 host: streamforge.localhost
 s3PublicUrl: http://s3.streamforge.localhost
 
+# create: false -> the Secret `streamforge-app` (jwtSecret, seedPassword) is created out of
+# band (GitOps: scripts/gitops-secrets.sh).
+secrets:
+  create: true
+
 # From the gitignored deploy/helm/secrets.local.yaml (`make secrets`).
 jwtSecret: ""
 adminEmails: demo@streamforge.local

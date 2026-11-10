@@ -1,0 +1,160 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    runs-on: ubuntu-24.04
+    outputs:
+      go: ${{ steps.f.outputs.go }}
+      node: ${{ steps.f.outputs.node }}
+      infra: ${{ steps.f.outputs.infra }}
+      helm: ${{ steps.f.outputs.helm }}
+      workflows: ${{ steps.f.outputs.workflows }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        id: f
+        with:
+          filters: |
+            go: ['go/**']
+            node: ['apps/**', 'services/**', 'package.json', 'pnpm-*.yaml']
+            infra: ['infra/**', 'deploy/docker-compose.yml', 'deploy/helm/streamforge-deps/files/**', 'scripts/**']
+            helm: ['deploy/helm/**', 'deploy/gitops/**', 'deploy/argocd/**']
+            workflows: ['.github/**']
+
+  go:
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
+    runs-on: ubuntu-24.04
+    defaults: { run: { working-directory: go } }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with: { go-version-file: go/go.mod, cache-dependency-path: go/go.sum }
+      - run: sudo apt-get update -q && sudo apt-get install -yq ffmpeg
+      - name: vet + gofmt
+        run: go vet ./... && go vet -tags integration ./... && test -z "$(gofmt -l .)"
+      - name: unit tests
+        run: go test -race ./...
+      - name: integration tests (Testcontainers + real ffmpeg)
+        run: go test -tags integration -count=1 ./...
+
+  node:
+    needs: changes
+    if: needs.changes.outputs.node == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with: { node-version: 26.13.0, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm -r lint
+      - run: pnpm -r test
+
+  # API integration tests against the docker-compose emulators (same as `make dev-infra`).
+  integration:
+    needs: changes
+    if: needs.changes.outputs.node == 'true' || needs.changes.outputs.infra == 'true' || needs.changes.outputs.go == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with: { node-version: 26.13.0, cache: pnpm }
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with: { terraform_version: 1.17.1, terraform_wrapper: false }
+      - name: start emulators and create resources
+        run: make dev-infra tf-local
+      - run: scripts/smoke-messaging.sh
+      - name: catalog-api integration tests (presigned multipart flow, job state machine)
+        run: set -a && . ./.env && set +a && pnpm --filter @streamforge/catalog-api test:integration
+      - if: failure()
+        run: docker compose --env-file .env -f deploy/docker-compose.yml logs --tail 100
+
+  helm:
+    needs: changes
+    if: needs.changes.outputs.helm == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: azure/setup-helm@2f5e7bc67f1f9972ab16657bb795f36d8f04de0e # v5.1.0
+        with: { version: v4.3.1 }
+      - name: lint + render every chart with every environment's values
+        run: |
+          set -euo pipefail
+          S=(--set jwtSecret=ci --set s3.accessKey=ci --set s3.secretKey=ci)
+          for c in streamforge-deps streamforge; do
+            helm dependency build deploy/helm/$c >/dev/null
+            helm lint --strict deploy/helm/$c --set global.imageTag=ci "${S[@]}"
+            for env in staging prod; do
+              helm template t deploy/helm/$c -f deploy/gitops/$env/values.yaml -f deploy/gitops/$env/images.yaml "${S[@]}" > /dev/null
+            done
+          done
+          helm lint --strict deploy/argocd/apps
+
+  terraform:
+    needs: changes
+    if: needs.changes.outputs.infra == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with: { terraform_version: 1.17.1, terraform_wrapper: false }
+      - run: terraform fmt -check -recursive infra/terraform
+      - name: validate (local emulators + real AWS; AWS is never applied)
+        run: |
+          for d in local aws; do
+            (cd infra/terraform/$d && terraform init -backend=false -input=false >/dev/null && terraform validate)
+          done
+      - uses: terraform-linters/setup-tflint@6ffdbaa3be476b3431f7275c26966ef32ff60337 # v6.3.2
+        with: { tflint_version: v0.66.0 }
+      - name: tflint
+        env: { GITHUB_TOKEN: "${{ github.token }}" }
+        run: |
+          tflint --init --config "$PWD/infra/terraform/.tflint.hcl"
+          for d in aws local modules/pipeline; do tflint --chdir infra/terraform/$d --config "$PWD/infra/terraform/.tflint.hcl"; done
+      - uses: bridgecrewio/checkov-action@99bb2caf247dfd9f03cf984373bc6043d4e32ebf # v12.1347.0
+        with:
+          directory: infra/terraform/aws
+          framework: terraform
+          config_file: infra/terraform/aws/.checkov.yaml
+          download_external_modules: true
+
+  security:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { fetch-depth: 0 }
+      - name: gitleaks (full history)
+        run: docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:v8.30.1 git /repo --redact --no-banner
+      - name: trivy (dependencies, Dockerfiles, Helm/K8s misconfig, secrets)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,misconfig,secret
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          trivy-config: trivy.yaml
+          version: v0.76.2
+
+  actionlint:
+    needs: changes
+    if: needs.changes.outputs.workflows == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12 -color

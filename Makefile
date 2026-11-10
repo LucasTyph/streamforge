@@ -4,7 +4,7 @@ COMPOSE := docker compose --env-file .env -f deploy/docker-compose.yml
 LOAD_ENV := set -a && source .env && set +a
 
 .PHONY: test-go-integration test-e2e media cluster platform secrets images deploy status help env dev dev-infra tf-local seed down clean test test-integration smoke lint \
-        up up-lite demo load chaos tf-aws-validate
+        up up-lite demo load chaos tf-aws-validate argocd gitops-up gitops-owner security
 
 help: ## List targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
@@ -122,5 +122,41 @@ down: ## Delete the k3d cluster (and stop the docker-compose dev stack)
 	$(COMPOSE) down
 demo load chaos: ## (M6/M7) Scaling demo, load tests, chaos
 	@echo "'make $@' arrives in M6/M7."; exit 1
-tf-aws-validate: ## (M5) Validate the real-AWS Terraform
-	@echo "'make $@' arrives in M5."; exit 1
+
+# ---- GitOps (ArgoCD) ---------------------------------------------------------
+ARGOCD_CHART_VERSION := 10.17.1
+OWNER ?=
+
+gitops-owner: ## Point GitOps files at your GitHub repo/GHCR: make gitops-owner OWNER=<github user>
+	@[ -n "$(OWNER)" ] || { echo "usage: make gitops-owner OWNER=<github user>"; exit 1; }
+	sed -i "s#ghcr.io/[A-Za-z0-9_.-]*#ghcr.io/$$(echo $(OWNER) | tr A-Z a-z)#; s#github.com/[A-Za-z0-9_.-]*/streamforge.git#github.com/$(OWNER)/streamforge.git#" \
+	  deploy/gitops/*/values.yaml deploy/argocd/apps/values.yaml deploy/argocd/bootstrap/root.yaml
+	@grep -rn "OWNER" deploy/gitops deploy/argocd && exit 1 || echo "GitOps files now point at $(OWNER)"
+
+argocd: cluster ## Install ArgoCD (UI: http://argocd.streamforge.localhost)
+	helm repo add argo https://argoproj.github.io/argo-helm >/dev/null 2>&1 || true
+	helm repo update argo >/dev/null
+	helm upgrade --install argocd argo/argo-cd --version $(ARGOCD_CHART_VERSION) --namespace argocd --create-namespace \
+	  -f deploy/argocd/argocd-values.yaml --wait --timeout 10m
+
+gitops-up: argocd ## ArgoCD + per-env secrets + root app: staging & prod follow git (main)
+	@grep -q "OWNER" deploy/argocd/bootstrap/root.yaml && { echo "run 'make gitops-owner OWNER=<github user>' first"; exit 1; } || true
+	scripts/gitops-secrets.sh streamforge-staging streamforge-prod
+	kubectl apply -f deploy/argocd/bootstrap/root.yaml
+	@printf "\n  ArgoCD: http://argocd.streamforge.localhost  user: admin  password: "
+	@kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d; echo
+	@printf "  staging: http://staging.streamforge.localhost   prod: http://prod.streamforge.localhost\n\n"
+
+# ---- Infra checks (same pinned tools as CI, via their official images) ---------
+tf-aws-validate: ## Validate + tflint + checkov the real-AWS Terraform (never applied)
+	cd infra/terraform/aws && terraform init -backend=false -input=false >/dev/null && terraform validate
+	docker run --rm -v "$$PWD/infra/terraform:/data" -w /data/aws --entrypoint sh ghcr.io/terraform-linters/tflint:v0.66.0 \
+	  -c "tflint --init --config /data/.tflint.hcl >/dev/null && tflint --config /data/.tflint.hcl && cd ../local && tflint --config /data/.tflint.hcl && cd ../modules/pipeline && tflint --config /data/.tflint.hcl"
+	docker run --rm -v "$$PWD/infra/terraform:/tf" bridgecrew/checkov:3.4.3 -d /tf/aws --framework terraform \
+	  --config-file /tf/aws/.checkov.yaml --download-external-modules true --quiet --compact
+
+security: ## gitleaks + Trivy (deps, Dockerfiles, Helm misconfig, secrets) + actionlint
+	docker run --rm -v "$$PWD:/repo" zricethezav/gitleaks:v8.30.1 git /repo --redact --no-banner
+	docker run --rm -v "$$PWD:/repo" -w /repo -v trivy-cache:/root/.cache aquasec/trivy:0.76.2 fs --config trivy.yaml \
+	  --scanners vuln,misconfig,secret --exit-code 1 .
+	docker run --rm -v "$$PWD:/repo" -w /repo rhysd/actionlint:1.7.12 -color

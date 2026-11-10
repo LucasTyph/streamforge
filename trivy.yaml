@@ -1,0 +1,21 @@
+# Trivy filesystem scan config (CI `security` job and `make security`).
+severity: [HIGH, CRITICAL]
+scan:
+  skip-dirs:
+    - "**/node_modules"
+    - "**/.next"
+    - "**/.terraform"
+    - media
+    # Terraform is scanned by checkov in the terraform job: the AWS root with hardening on.
+    # The local root targets emulators, where bucket hardening is off on purpose (ADR-002).
+    - infra/terraform
+vulnerability:
+  ignore-unfixed: true
+misconfiguration:
+  # Helm charts are rendered with their default values for the scan.
+  helm:
+    set:
+      - global.imageTag=scan
+      - jwtSecret=scan
+      - s3.accessKey=scan
+      - s3.secretKey=scan
