@@ -72,7 +72,7 @@ jobs:
             probe-worker)     echo "context=go"; echo "file=go/Dockerfile.ffmpeg"; echo "args=CMD=probe" ;;
             transcode-worker) echo "context=go"; echo "file=go/Dockerfile.ffmpeg"; echo "args=CMD=transcode" ;;
             thumbnail-worker) echo "context=go"; echo "file=go/Dockerfile.ffmpeg"; echo "args=CMD=thumbnail" ;;
-            catalog-api)      echo "context=.";  echo "file=services/catalog-api/Dockerfile"; echo "args=" ;;
+            catalog-api)      echo "context=.";  echo "file=services/catalog-api/Dockerfile"; echo "args=APP_VERSION=${GITHUB_SHA::7}" ;;
             web)              echo "context=.";  echo "file=apps/web/Dockerfile";  echo "args=" ;;
             terraform-local)  echo "context=infra/terraform"; echo "file=infra/terraform/Dockerfile"; echo "args=" ;;
           esac >> "$GITHUB_OUTPUT"

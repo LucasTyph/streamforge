@@ -17,7 +17,8 @@ COPY --from=build /out/package.json ./
 COPY --from=build /out/node_modules ./node_modules
 COPY --from=build /out/dist ./dist
 COPY --from=build /out/drizzle ./drizzle
-ENV NODE_ENV=production API_PORT=4000
+ARG APP_VERSION=dev
+ENV NODE_ENV=production API_PORT=4000 APP_VERSION=$APP_VERSION
 USER nonroot
 EXPOSE 4000
 HEALTHCHECK --interval=10s --timeout=3s CMD ["/nodejs/bin/node", "-e", "fetch('http://127.0.0.1:4000/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]

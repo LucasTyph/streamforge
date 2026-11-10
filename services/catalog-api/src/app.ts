@@ -63,7 +63,8 @@ export async function buildApp(deps: AppDeps, opts: FastifyServerOptions = {}) {
   });
   await app.register(swaggerUi, { routePrefix: "/docs" });
 
-  app.get("/healthz", { schema: { hide: true } }, async () => ({ ok: true }));
+  // version = git SHA baked in by the release workflow ("dev" for local builds)
+  app.get("/healthz", { schema: { hide: true } }, async () => ({ ok: true, version: process.env.APP_VERSION ?? "dev" }));
   app.get("/readyz", { schema: { hide: true } }, async (_req, reply) => {
     try {
       await db.execute(sql`select 1`);

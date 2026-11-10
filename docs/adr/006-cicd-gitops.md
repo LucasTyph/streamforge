@@ -64,8 +64,9 @@ checkov skip has a written reason in `.checkov.yaml`.
 - The bot pushes to `main` with `GITHUB_TOKEN`. Pushes made with that token don't trigger
   other workflows, so there are no build loops (`[skip ci]` is a second guard). Branch
   protection on `main` would require a PR-based bump (e.g. a GitHub App token).
-- GHCR packages start private. Making them public, or adding an image pull secret, is
-  needed before the local cluster can pull them.
+- GHCR packages pushed from this public repo inherited its public visibility (verified:
+  anonymous manifest pulls succeed), so the cluster needs no pull secret. A private repo
+  would need one.
 - Staging and prod on one laptop cost RAM. They run single replicas with smaller volumes;
   the manual `make up-lite` release and the GitOps environments can't all run at once
   within 10 GB.
