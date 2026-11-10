@@ -13,9 +13,10 @@ pf=$!; trap 'kill $pf 2>/dev/null' EXIT; sleep 3
 depths() { # -> "probe,transcode,thumbnail"
   curl -s localhost:19091/api/v1/query --data-urlencode \
     "query=max by (queue) (sum by (queue, pod) (streamforge_queue_messages{namespace=\"$ns\", dlq=\"false\", state=~\"visible|in_flight\"}))" |
-    jq -r '[.data.result[] | {(.metric.queue): .value[1]}] | add // {} | "\(.probe // 0),\(.transcode // 0),\(.thumbnail // 0)"'
+    jq -r '[.data.result[] | {(.metric.queue): .value[1]}] | add // {} | "\(.probe // "NA"),\(.transcode // "NA"),\(.thumbnail // "NA")"' # NA = no data, not 0
 }
-replicas() { kubectl -n "$ns" get deploy "$1" -o jsonpath='{.status.readyReplicas}' 2>/dev/null | sed 's/^$/0/'; }
+# readyReplicas is absent (not 0) when a Deployment is scaled to zero
+replicas() { local r; r=$(kubectl -n "$ns" get deploy "$1" -o jsonpath='{.status.readyReplicas}' 2>/dev/null); echo "${r:-0}"; }
 
 echo "t_seconds,probe_queue,transcode_queue,thumbnail_queue,probe_workers,transcode_workers,thumbnail_workers" > "$out"
 t0=$(date +%s) stopped_at=""
