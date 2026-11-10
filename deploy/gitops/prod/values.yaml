@@ -1,7 +1,7 @@
 # Prod, synced by ArgoCD from `main`; changes only via promote.yml (both Helm releases read this file).
 # Images come from GHCR; tags live in images.yaml (copied from staging by promote.yml).
 global:
-  registry: ghcr.io/OWNER # `make gitops-owner OWNER=<github user>`
+  registry: ghcr.io/lucastyph # `make gitops-owner OWNER=<github user>`
 
 secrets: { create: false } # created out of band: scripts/gitops-secrets.sh
 

@@ -1,4 +1,4 @@
-repoURL: https://github.com/OWNER/streamforge.git # `make gitops-owner OWNER=<github user>`
+repoURL: https://github.com/LucasTyph/streamforge.git # `make gitops-owner OWNER=<github user>`
 targetRevision: main
 
 cnpg:

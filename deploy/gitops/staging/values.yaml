@@ -1,7 +1,7 @@
 # Staging, synced by ArgoCD from `main` (both Helm releases read this file).
 # Images come from GHCR; tags live in images.yaml (bumped by CI on every merge).
 global:
-  registry: ghcr.io/OWNER # `make gitops-owner OWNER=<github user>`
+  registry: ghcr.io/lucastyph # `make gitops-owner OWNER=<github user>`
 
 secrets: { create: false } # created out of band: scripts/gitops-secrets.sh
 
