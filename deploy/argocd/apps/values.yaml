@@ -1,13 +1,30 @@
 repoURL: https://github.com/LucasTyph/streamforge.git # `make gitops-owner OWNER=<github user>`
 targetRevision: main
 
-cnpg:
-  chartVersion: 0.29.1 # operator 1.30.1, same as `make platform`
+# Cluster-wide charts, installed before the environments (sync wave). Values files come
+# from this repo (multi-source Applications), so `make up` and GitOps share them.
+platform:
+  - { name: cnpg-operator, repo: https://cloudnative-pg.github.io/charts, chart: cloudnative-pg, version: 0.29.1,
+      release: cnpg, namespace: cnpg-system, wave: -2,
+      values: { resources: { requests: { cpu: 50m, memory: 64Mi }, limits: { memory: 256Mi } } } }
+  - { name: keda, repo: https://kedacore.github.io/charts, chart: keda, version: 2.21.0,
+      release: keda, namespace: keda, wave: -2, valueFile: observability/values/keda.yaml }
+  - { name: kube-prometheus-stack, repo: https://prometheus-community.github.io/helm-charts, chart: kube-prometheus-stack,
+      version: 93.1.2, release: kps, namespace: monitoring, wave: -2, valueFile: observability/values/kube-prometheus-stack.yaml }
+  - { name: loki, repo: https://grafana.github.io/helm-charts, chart: loki, version: 7.5.0,
+      release: loki, namespace: monitoring, wave: -1, valueFile: observability/values/loki.yaml }
+  - { name: tempo, repo: https://grafana-community.github.io/helm-charts, chart: tempo, version: 3.2.1,
+      release: tempo, namespace: monitoring, wave: -1, valueFile: observability/values/tempo.yaml }
+  - { name: otel-collector, repo: https://open-telemetry.github.io/opentelemetry-helm-charts, chart: opentelemetry-collector,
+      version: 0.178.3, release: otel-collector, namespace: monitoring, wave: -1, valueFile: observability/values/otel-collector.yaml }
+  - { name: streamforge-observability, path: observability/chart, release: streamforge-observability, namespace: monitoring, wave: -1 }
 
 # Each environment = two Helm releases in its own namespace, configured by
-# deploy/gitops/<name>/{values,images}.yaml.
+# deploy/gitops/<name>/{values,images}.yaml. `enabled: false` keeps the files but removes
+# the environment from the cluster (prod is paused to fit the laptop RAM budget).
 environments:
   - name: staging
     namespace: streamforge-staging
   - name: prod
     namespace: streamforge-prod
+    enabled: false

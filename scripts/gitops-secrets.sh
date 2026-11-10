@@ -4,6 +4,11 @@
 # Usage: scripts/gitops-secrets.sh <namespace> [<namespace>...]
 # (A shared cluster would use Sealed Secrets or External Secrets instead, see ADR-006.)
 set -euo pipefail
+kubectl create namespace monitoring --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+kubectl -n monitoring get secret grafana-admin >/dev/null 2>&1 || {
+  kubectl -n monitoring create secret generic grafana-admin     --from-literal=admin-user=admin --from-literal=admin-password="$(openssl rand -hex 16)" >/dev/null
+  echo "created monitoring/grafana-admin"
+}
 for ns in "$@"; do
   kubectl create namespace "$ns" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
   if ! kubectl -n "$ns" get secret streamforge-s3 >/dev/null 2>&1; then

@@ -24,11 +24,11 @@
      "uid": "prometheus"
     },
     "query": {
-     "query": "label_values(streamforge_queue_messages, namespace)",
+     "query": "label_values(kube_namespace_status_phase{namespace=~\"streamforge.*\"}, namespace)",
      "refId": "ns"
     },
-    "definition": "label_values(streamforge_queue_messages, namespace)",
-    "refresh": 2,
+    "definition": "label_values(kube_namespace_status_phase{namespace=~\"streamforge.*\"}, namespace)",
+    "refresh": 1,
     "current": {
      "text": "streamforge",
      "value": "streamforge"
@@ -442,7 +442,17 @@
     "overrides": []
    },
    "options": {},
-   "description": "Each video is one trace: upload complete (catalog-api) -> SNS -> probe -> transcode / thumbnail -> job status."
+   "description": "Each video is one trace: upload complete (catalog-api) -> SNS -> probe -> transcode / thumbnail -> job status.",
+   "transformations": [
+    {
+     "id": "organize",
+     "options": {
+      "excludeByName": {
+       "nested": true
+      }
+     }
+    }
+   ]
   },
   {
    "id": 5,

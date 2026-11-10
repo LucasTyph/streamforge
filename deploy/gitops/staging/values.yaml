@@ -2,6 +2,7 @@
 # Images come from GHCR; tags live in images.yaml (bumped by CI on every merge).
 global:
   registry: ghcr.io/lucastyph # `make gitops-owner OWNER=<github user>`
+  observability: { enabled: true, namespace: monitoring, otlpEndpoint: "http://otel-collector.monitoring.svc.cluster.local:4318" }
 
 secrets: { create: false } # created out of band: scripts/gitops-secrets.sh
 

@@ -6,31 +6,49 @@ syncPolicy:
     limit: 10
     backoff: { duration: 15s, factor: 2, maxDuration: 5m }
 {{- end }}
-# Wave -1: cluster operators.
+{{- range $p := .Values.platform }}
+---
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: cnpg-operator
+  name: {{ $p.name }}
   namespace: argocd
-  annotations: { argocd.argoproj.io/sync-wave: "-1" }
+  annotations: { argocd.argoproj.io/sync-wave: {{ $p.wave | quote }} }
   finalizers: [resources-finalizer.argocd.argoproj.io]
 spec:
   project: default
-  source:
-    repoURL: https://cloudnative-pg.github.io/charts
-    chart: cloudnative-pg
-    targetRevision: {{ .Values.cnpg.chartVersion | quote }}
-    helm:
-      releaseName: cnpg
-      valuesObject:
-        resources:
-          requests: { cpu: 50m, memory: 64Mi }
-          limits: { memory: 256Mi }
+  {{- if $p.path }}
+  source: # chart in this repo
+    repoURL: {{ $.Values.repoURL }}
+    targetRevision: {{ $.Values.targetRevision }}
+    path: {{ $p.path }}
+    helm: { releaseName: {{ $p.release }} }
+  {{- else }}
+  sources:
+    - repoURL: {{ $p.repo }}
+      chart: {{ $p.chart }}
+      targetRevision: {{ $p.version | quote }}
+      helm:
+        releaseName: {{ $p.release }}
+        {{- with $p.valueFile }}
+        valueFiles: [$values/{{ . }}]
+        {{- end }}
+        {{- with $p.values }}
+        valuesObject: {{- toYaml . | nindent 10 }}
+        {{- end }}
+    {{- if $p.valueFile }}
+    - repoURL: {{ $.Values.repoURL }} # provides $values
+      targetRevision: {{ $.Values.targetRevision }}
+      ref: values
+    {{- end }}
+  {{- end }}
   destination:
     server: https://kubernetes.default.svc
-    namespace: cnpg-system
-  {{- include "apps.sync" . | nindent 2 }}
-{{- range $i, $env := .Values.environments }}
+    namespace: {{ $p.namespace }}
+  {{- include "apps.sync" $ | nindent 2 }}
+{{- end }}
+{{- range $env := .Values.environments }}
+{{- if ne $env.enabled false }}
 {{- range $r := list (dict "name" "deps" "chart" "streamforge-deps" "release" "streamforge-deps" "wave" 0) (dict "name" "app" "chart" "streamforge" "release" "streamforge" "wave" 1) }}
 ---
 apiVersion: argoproj.io/v1alpha1
@@ -55,5 +73,6 @@ spec:
     server: https://kubernetes.default.svc
     namespace: {{ $env.namespace }}
   {{- include "apps.sync" $ | nindent 2 }}
+{{- end }}
 {{- end }}
 {{- end }}

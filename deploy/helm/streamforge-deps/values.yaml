@@ -59,7 +59,7 @@ seaweedfs:
   files: [{ name: s3-config, mountPath: /etc/seaweedfs, secret: streamforge-s3 }]
   resources:
     requests: { cpu: 100m, memory: 256Mi }
-    limits: { memory: 1Gi }
+    limits: { memory: 1280Mi } # peak 896Mi in the 20-upload demo with GOMEMLIMIT=850MiB
   networkPolicy:
     allowSelf: true # master, volume, filer and S3 gateway talk over the pod IP
     from: [ingress, catalog-api, probe-worker, transcode-worker, thumbnail-worker, terraform-local]

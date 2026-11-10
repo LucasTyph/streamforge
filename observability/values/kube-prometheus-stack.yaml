@@ -34,6 +34,13 @@ prometheus-node-exporter:
 
 grafana:
   fullnameOverride: grafana
+  # The ~25 bundled Kubernetes dashboards pushed Grafana into GC thrash at 512Mi (health
+  # checks timed out); the laptop budget keeps only the StreamForge dashboards.
+  defaultDashboardsEnabled: false
+  env:
+    # Grafana 13 (built-in API server + search index) needs ~400Mi to run; a GOMEMLIMIT at
+    # that level made the GC run constantly and health checks time out.
+    GOMEMLIMIT: 640MiB
   admin:
     existingSecret: grafana-admin # created by `make observability` (random password)
     userKey: admin-user
@@ -74,4 +81,4 @@ grafana:
         nodeGraph: { enabled: true }
         search: { hide: false }
   # 256Mi was OOM-killed while loading the default Kubernetes dashboards
-  resources: { requests: { cpu: 20m, memory: 128Mi }, limits: { memory: 512Mi } }
+  resources: { requests: { cpu: 20m, memory: 384Mi }, limits: { memory: 768Mi } } # 256Mi: OOM; ~400Mi working set

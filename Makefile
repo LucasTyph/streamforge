@@ -3,7 +3,7 @@ SHELL := /bin/bash
 COMPOSE := docker compose --env-file .env -f deploy/docker-compose.yml
 LOAD_ENV := set -a && source .env && set +a
 
-.PHONY: observability grafana-password demo test-go-integration test-api-integration test-e2e media cluster platform secrets images deploy status help env dev dev-infra tf-local seed down clean test test-integration smoke lint \
+.PHONY: observability dashboards grafana-password demo test-go-integration test-api-integration test-e2e media cluster platform secrets images deploy status help env dev dev-infra tf-local seed down clean test test-integration smoke lint \
         up up-lite demo load chaos tf-aws-validate argocd gitops-up gitops-owner security
 
 help: ## List targets
@@ -129,6 +129,9 @@ observability: ## Prometheus, Grafana, Alertmanager, Loki, Tempo, OTel Collector
 	  -f observability/values/otel-collector.yaml --wait --timeout 10m
 	helm upgrade --install streamforge-observability observability/chart -n monitoring --wait
 
+dashboards: ## Regenerate Grafana dashboard JSON from observability/dashboards.py
+	python3 observability/dashboards.py
+
 grafana-password: ## Print the Grafana admin password
 	@kubectl -n monitoring get secret grafana-admin -o jsonpath='{.data.admin-password}' | base64 -d; echo
 
@@ -189,7 +192,7 @@ argocd: cluster ## Install ArgoCD (UI: http://argocd.streamforge.localhost)
 
 gitops-up: argocd ## ArgoCD + per-env secrets + root app: staging & prod follow git (main)
 	@grep -q "github.com/OWNER/" deploy/argocd/bootstrap/root.yaml && { echo "run 'make gitops-owner OWNER=<github user>' first"; exit 1; } || true
-	scripts/gitops-secrets.sh streamforge-staging streamforge-prod
+	scripts/gitops-secrets.sh streamforge-staging
 	kubectl apply -f deploy/argocd/bootstrap/root.yaml
 	@printf "\n  ArgoCD: http://argocd.streamforge.localhost  user: admin  password: "
 	@kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d; echo
