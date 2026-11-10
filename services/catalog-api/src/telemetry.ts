@@ -13,10 +13,8 @@ const SERVICE = "catalog-api";
 export const fastifyOtel = new FastifyOtelInstrumentation({
   registerOnInitialization: false,
   ignorePaths: (r) => ["/healthz", "/readyz", "/metrics"].includes(r.url), // probes and scrapes would drown the traces
-  // One span per request named "METHOD /route"; per-hook spans were named after the hook
-  // functions' source code and added noise without information.
-  instrumentHooks: false,
-  instrumentHandler: false,
+  // Name the request span "METHOD /route" (default: "request"). Setting instrumentHooks or
+  // instrumentHandler to false stopped request spans entirely here, so defaults stay.
   requestHook: (span, req) => span.updateName(`${req.method} ${req.routeOptions.url ?? req.url}`),
 });
 
