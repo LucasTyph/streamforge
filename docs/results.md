@@ -82,3 +82,14 @@ cnpg-cloudnative-pg-859cbd5cd-msshl   4m           33Mi
   ✓  2 [chromium] › e2e/upload-play.spec.ts:51:1 › a corrupt upload ends FAILED with a readable reason (1.2s)
   2 passed (13.4s)
 ```
+
+## GitOps loop (M5)
+- **Date:** 2026-11-10. **Setup:** GitHub-hosted runners (ci, release); local k3d with ArgoCD 3.6.1 (chart 10.17.1), app reconciliation every 60 s.
+- **What was measured:** time from `git push` of commit `38cc69c` (catalog-api change) until
+  `http://staging.streamforge.localhost/api/healthz` returned `"version":"38cc69c"`, polled every 10 s.
+- **Path:** release.yml built catalog-api (amd64 + arm64) -> GHCR `:38cc69c` -> bot commit
+  `b88e93c` bumping `deploy/gitops/staging/images.yaml` -> ArgoCD sync -> rollout.
+- **Raw output:** `push->staging serving new build: 208s (+ ~20s before this started)`, so about **228 s**.
+- **Observed during rollout:** one request returned `Gateway Timeout` (single replica, no preStop delay).
+
+Single run; GitHub runner queue time varies.

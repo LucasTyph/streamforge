@@ -61,8 +61,14 @@
 - [x] ArgoCD app-of-apps (`deploy/argocd`): CNPG operator, staging + prod (deps wave 0, app wave 1), per-env values/images files ([ADR-006](adr/006-cicd-gitops.md))
 - [x] `infra/terraform/aws`: VPC, private EKS + IRSA, RDS, ElastiCache, KMS, hardened pipeline module; validate + tflint clean, checkov 420 passed / 0 failed (justified skips)
 - [x] Verified locally with the CI tool versions: `make tf-aws-validate`, `make security` (gitleaks, Trivy, actionlint), Helm strict lint + env renders, arm64 images built and smoke-tested
-- [ ] Create the GitHub repo and push (needs your OK); first CI + release runs
-- [ ] `make gitops-up` against the repo: ArgoCD syncs staging to the CI-built images
+- [x] Public repo https://github.com/LucasTyph/streamforge (history rewritten to the GitHub no-reply email; build brief removed)
+- [x] First CI runs caught real bugs, all fixed: `go/internal/media` was never committed (`.gitignore` `media/`), CRITICAL openssh CVEs in the terraform image base, checkov-action module fetch, tests racing the pipeline workers, a GitOps bump race between two release runs
+- [x] `ci` and `release` green on main; all 8 images multi-arch on GHCR (public)
+- [x] `make gitops-up` on a fresh cluster: ArgoCD installs CNPG + staging from git; Playwright passes against http://staging.streamforge.localhost
+- [x] Merge -> staging measured: commit `38cc69c` (API reports its version in `/healthz`) served by staging ~3.8 min after the push (2026-11-10)
+
+**M5 complete (2026-11-10).** Prod waits for its first manual promotion (Actions -> promote).
+Known issue: a single-replica rollout returned one `504` through Traefik (no preStop delay yet), to fix in M6.
 
 ## M6–M7
 Not started: M6 autoscaling (KEDA) + observability (Prometheus, Loki, Tempo, Grafana); M7 load tests, benchmarks, chaos, final README.

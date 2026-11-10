@@ -4,7 +4,7 @@ Event-driven video processing platform: upload a video in the browser, and a pip
 autoscaling workers probes it, transcodes it to adaptive HLS, and generates thumbnails,
 with live progress in the UI.
 
-> **Status:** M5 (CI/CD, GitOps, AWS IaC) built and verified locally; GitHub repo + first CI run pending. See [docs/PROGRESS.md](docs/PROGRESS.md).
+> **Status:** M5 (CI/CD, GitOps, AWS IaC) complete; M6 (autoscaling + observability) next. See [docs/PROGRESS.md](docs/PROGRESS.md).
 
 ## Stack
 Go workers · TypeScript/Fastify API · Next.js · Postgres · Redis · Kubernetes (k3d, Helm,
