@@ -44,15 +44,18 @@ seaweedfs:
   image: { repository: chrislusf/seaweedfs, tag: "4.53", external: true }
   port: 8333
   command: [weed]
+  # The *.concurrentUploadLimitMB caps make bursts of uploads wait instead of buffering
+  # everything in memory (20 simultaneous multipart uploads OOM-killed it at 768Mi).
   args: [server, -dir=/data, -s3, -s3.port=8333, -s3.config=/etc/seaweedfs/s3.json,
-         -master.volumeSizeLimitMB=512, -volume.max=0, -ip.bind=0.0.0.0]
+         -master.volumeSizeLimitMB=512, -volume.max=0, -ip.bind=0.0.0.0,
+         -s3.concurrentUploadLimitMB=64, -filer.concurrentUploadLimitMB=64, -volume.concurrentUploadLimitMB=64]
   probes: { liveness: /status, readiness: /status, initialDelaySeconds: 10 }
   persistence: { size: 5Gi, mountPath: /data }
   emptyDirs: [{ name: tmp, mountPath: /tmp }]
   files: [{ name: s3-config, mountPath: /etc/seaweedfs, secret: streamforge-s3 }]
   resources:
     requests: { cpu: 100m, memory: 256Mi }
-    limits: { memory: 768Mi }
+    limits: { memory: 1Gi }
   networkPolicy:
     allowSelf: true # master, volume, filer and S3 gateway talk over the pod IP
     from: [ingress, catalog-api, probe-worker, transcode-worker, thumbnail-worker, terraform-local]

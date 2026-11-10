@@ -39,6 +39,16 @@ function xfetch(url, init = {}) {
 }
 
 const API = process.env.API_URL ?? "http://localhost:4000";
+// Like the browser: 4 parts in flight per file; FILES uploads in parallel (default 5).
+const FILES = Number(process.env.UPLOAD_CONCURRENCY ?? 5);
+async function pool(items, limit, fn) {
+  const out = new Array(items.length);
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) { const i = next++; out[i] = await fn(items[i]); }
+  }));
+  return out;
+}
 const args = process.argv.slice(2);
 let expect;
 if (args[0] === "--expect") [, expect] = args.splice(0, 2);
@@ -74,8 +84,7 @@ async function uploadOne(file) {
   const { urls } = await api(`/videos/${video.id}/upload/parts`, { partNumbers });
   const fh = await open(file);
   try {
-    const parts = await Promise.all(
-      urls.map(async ({ partNumber, url }) => {
+    const parts = await pool(urls, 4, async ({ partNumber, url }) => {
         const start = (partNumber - 1) * upload.partSize;
         const len = Math.min(upload.partSize, size - start);
         const buf = Buffer.alloc(len);
@@ -83,8 +92,7 @@ async function uploadOne(file) {
         const res = await xfetch(url, { method: "PUT", body: buf, headers: { "content-length": String(buf.length) } });
         if (!res.ok) throw new Error(`part ${partNumber}: ${res.status}`);
         return { partNumber, etag: res.headers.get("etag") };
-      }),
-    );
+    });
     await api(`/videos/${video.id}/upload/complete`, { parts });
   } finally {
     await fh.close();
@@ -112,7 +120,7 @@ async function waitFor({ id, file, uploadedAt }) {
   }
 }
 
-const uploads = await Promise.all(args.map(uploadOne));
+const uploads = await pool(args, FILES, uploadOne);
 const results = await Promise.all(uploads.map(waitFor));
 let ok = true;
 for (const r of results) {
