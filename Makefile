@@ -131,7 +131,7 @@ gitops-owner: ## Point GitOps files at your GitHub repo/GHCR: make gitops-owner 
 	@[ -n "$(OWNER)" ] || { echo "usage: make gitops-owner OWNER=<github user>"; exit 1; }
 	sed -i "s#ghcr.io/[A-Za-z0-9_.-]*#ghcr.io/$$(echo $(OWNER) | tr A-Z a-z)#; s#github.com/[A-Za-z0-9_.-]*/streamforge.git#github.com/$(OWNER)/streamforge.git#" \
 	  deploy/gitops/*/values.yaml deploy/argocd/apps/values.yaml deploy/argocd/bootstrap/root.yaml
-	@grep -rn "OWNER" deploy/gitops deploy/argocd && exit 1 || echo "GitOps files now point at $(OWNER)"
+	@grep -rnE "ghcr.io/OWNER|github.com/OWNER/" deploy/gitops deploy/argocd && exit 1 || echo "GitOps files now point at $(OWNER)"
 
 argocd: cluster ## Install ArgoCD (UI: http://argocd.streamforge.localhost)
 	helm repo add argo https://argoproj.github.io/argo-helm >/dev/null 2>&1 || true
@@ -140,7 +140,7 @@ argocd: cluster ## Install ArgoCD (UI: http://argocd.streamforge.localhost)
 	  -f deploy/argocd/argocd-values.yaml --wait --timeout 10m
 
 gitops-up: argocd ## ArgoCD + per-env secrets + root app: staging & prod follow git (main)
-	@grep -q "OWNER" deploy/argocd/bootstrap/root.yaml && { echo "run 'make gitops-owner OWNER=<github user>' first"; exit 1; } || true
+	@grep -q "github.com/OWNER/" deploy/argocd/bootstrap/root.yaml && { echo "run 'make gitops-owner OWNER=<github user>' first"; exit 1; } || true
 	scripts/gitops-secrets.sh streamforge-staging streamforge-prod
 	kubectl apply -f deploy/argocd/bootstrap/root.yaml
 	@printf "\n  ArgoCD: http://argocd.streamforge.localhost  user: admin  password: "
