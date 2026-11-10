@@ -11,7 +11,12 @@ export interface Depth {
 }
 
 export function createQueueReader(region: string, prefix: string) {
-  const sqs = new SQSClient({ region, requestHandler: { requestTimeout: 10_000, connectionTimeout: 3_000 } });
+  const sqs = new SQSClient({
+    region, // ElasticMQ advertises queue URLs for its own host name; always use the configured
+    // endpoint (AWS_ENDPOINT_URL_SQS) instead of the queue URL host.
+    useQueueUrlAsEndpoint: false,
+    requestHandler: { requestTimeout: 10_000, connectionTimeout: 3_000 },
+  });
   const urls = new Map<string, string>();
   const url = async (name: string) => {
     const full = prefix + name;

@@ -17,7 +17,12 @@ export interface StatusConsumerOptions {
 }
 
 export function startStatusConsumer(o: StatusConsumerOptions) {
-  const sqs = new SQSClient({ region: o.region, requestHandler: { requestTimeout: 30_000, connectionTimeout: 3_000 } });
+  const sqs = new SQSClient({
+    region: o.region, // ElasticMQ advertises queue URLs for its own host name; always use the configured
+    // endpoint (AWS_ENDPOINT_URL_SQS) instead of the queue URL host.
+    useQueueUrlAsEndpoint: false,
+    requestHandler: { requestTimeout: 30_000, connectionTimeout: 3_000 },
+  });
   const stop = new AbortController();
 
   const handle = async (body: string, attrs: Record<string, string>) => {
