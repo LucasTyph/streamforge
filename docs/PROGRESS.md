@@ -65,4 +65,4 @@
 - [ ] `make gitops-up` against the repo: ArgoCD syncs staging to the CI-built images
 
 ## M6–M7
-Not started. See the build brief.
+Not started: M6 autoscaling (KEDA) + observability (Prometheus, Loki, Tempo, Grafana); M7 load tests, benchmarks, chaos, final README.
