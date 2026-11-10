@@ -4,7 +4,7 @@ Event-driven video processing platform: upload a video in the browser, and a pip
 autoscaling workers probes it, transcodes it to adaptive HLS, and generates thumbnails,
 with live progress in the UI.
 
-> **Status:** M5 (CI/CD, GitOps, AWS IaC) complete; M6 (autoscaling + observability) next. See [docs/PROGRESS.md](docs/PROGRESS.md).
+> **Status:** M6 (autoscaling + observability) complete; M7 (benchmarks, chaos, final docs) next. See [docs/PROGRESS.md](docs/PROGRESS.md).
 
 ## Stack
 Go workers · TypeScript/Fastify API · Next.js · Postgres · Redis · Kubernetes (k3d, Helm,
@@ -36,10 +36,16 @@ API docs: http://localhost:4000/docs. `make help` lists all targets.
 
 ## Run it on Kubernetes (k3d)
 ```bash
-make up-lite    # k3d cluster + CloudNativePG + images + Helm releases (~10 min the first time)
+make up         # k3d + CloudNativePG + KEDA + Prometheus/Grafana/Loki/Tempo + the app
+make demo       # 20 uploads at once: watch workers scale 0 -> N -> 0
 ```
-Then open http://streamforge.localhost (demo user as above). `make status` shows pods and
-resource usage; `make down` deletes the cluster. Stop the compose dev stack first
+- App: http://streamforge.localhost (demo user as above)
+- Grafana: http://grafana.streamforge.localhost, dashboard **StreamForge / Pipeline** (queue
+  depth vs autoscaled workers, throughput, latency, traces, logs). Admin: `make grafana-password`.
+
+`make up-lite` skips observability (less RAM). `make status` shows pods and usage;
+`make down` deletes the cluster. Design: [ADR-005](docs/adr/005-kubernetes.md),
+[ADR-007](docs/adr/007-autoscaling-observability.md). Stop the compose dev stack first
 (`make dev-down`) to stay within the RAM budget. Design notes: [ADR-005](docs/adr/005-kubernetes.md).
 
 ## CI/CD and GitOps

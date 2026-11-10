@@ -93,3 +93,43 @@ cnpg-cloudnative-pg-859cbd5cd-msshl   4m           33Mi
 - **Observed during rollout:** one request returned `Gateway Timeout` (single replica, no preStop delay).
 
 Single run; GitHub runner queue time varies.
+
+## Autoscaling demo (M6)
+- **Date:** 2026-11-10. **Setup:** `make up` on k3d (1 server + 2 agents) in WSL2 (10 GB, 6 vCPU), full observability stack running.
+- **Command:** `make demo` equivalent with a sampler: `scripts/scaling-timeline.sh` (queue depth from Prometheus, ready replicas from Kubernetes, every 5 s) while `node scripts/upload-videos.mjs --expect READY media/demo/*.mp4` uploads 20 generated 720p clips of 20-45 s (585 MB total; 5 uploads at a time, 4 parts each).
+- **Result:** `20` of 20 READY, `demo exit=0 seconds=186` (first upload to last video READY). An earlier identical run took 196 s.
+- **Scaling:** workers went 0 -> probe 1, transcode 4 (max), thumbnail 3 (max) within ~20 s of the first upload; the transcode queue peaked at 20 and drained by t=212 s; every worker was back to 0 replicas at t=264 s.
+
+Timeline (every 3rd sample; queue = visible + in flight):
+```
+t_seconds  probe_queue  transcode_queue  thumbnail_queue  probe_workers  transcode_workers  thumbnail_workers
+0          0            0                0                0              0                  0
+17         0            0                0                0              0                  0
+36         3            20               20               1              3                  3
+56         0            19               12               1              4                  3
+76         0            18               9                1              4                  3
+96         0            17               3                0              4                  3
+115        0            14               0                0              4                  3
+138        0            12               0                0              4                  2
+159        0            8                0                0              4                  0
+177        0            5                0                0              4                  0
+195        0            4                0                0              4                  0
+212        0            0                0                0              4                  0
+229        0            0                0                0              4                  0
+247        0            0                0                0              3                  0
+264        0            0                0                0              0                  0
+280        0            0                0                0              0                  0
+297        0            0                0                0              0                  0
+```
+
+Peak working set during the run (`max_over_time` of `container_memory_working_set_bytes`):
+seaweedfs 896 MiB, transcode-worker 319-353 MiB each (x4), thumbnail-worker 111-145 MiB, catalog-api 134-138 MiB (the HPA ran 3 replicas during the upload burst), probe-worker 30 MiB.
+Per namespace: streamforge 3045 MiB, monitoring 2568 MiB, kube-system 368 MiB, keda 292 MiB, cnpg-system 80 MiB.
+
+**Budget note:** during the burst the WSL VM used ~8.8 GB of its 10 GB, Windows had ~0.6 GB free, and WSL briefly stopped answering commands (it recovered and the run completed). Idle with everything running: nodes 2.0 / 1.8 / 3.0 GiB; namespaces streamforge 691 MiB, monitoring 2377 MiB, keda 237 MiB, kube-system 242 MiB, cnpg-system 62 MiB; WSL `free` used 4.7 GB.
+
+**Failures found by this demo** (fixed, ADR-007): SeaweedFS OOM-killed by the burst (concurrent-upload caps + `GOMEMLIMIT`); Grafana OOM-killed at 256 MiB and GC-thrashing at a 400 MiB `GOMEMLIMIT`; catalog-api sending SQS calls to the queue URL host (`localhost`) instead of the configured endpoint.
+
+## Tracing and alerting checks (M6)
+- One video = one trace: 31 spans across catalog-api, probe-worker, transcode-worker and thumbnail-worker (ffprobe 213 ms, ffmpeg transcode 14.2 s, thumbnails 6.2 s, 6 status events applied); Loki held 12 log lines from the same 4 services carrying that trace id.
+- `StreamForgeDLQNotEmpty`: one message put on the thumbnail DLQ -> alert `firing` after 81 s (1 m `for` + scrape/evaluation) and active in Alertmanager; after purging the DLQ it returned to `inactive` within 30 s.

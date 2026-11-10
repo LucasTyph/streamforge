@@ -70,5 +70,16 @@
 **M5 complete (2026-11-10).** Prod waits for its first manual promotion (Actions -> promote).
 Known issue: a single-replica rollout returned one `504` through Traefik (no preStop delay yet), to fix in M6.
 
-## M6–M7
-Not started: M6 autoscaling (KEDA) + observability (Prometheus, Loki, Tempo, Grafana); M7 load tests, benchmarks, chaos, final README.
+## M6 — Autoscaling + observability
+- [x] KEDA `aws-sqs-queue` ScaledObjects against ElasticMQ (`awsEndpoint`): probe 0..2, transcode 0..4, thumbnail 0..3; HPA for catalog-api ([ADR-007](adr/007-autoscaling-observability.md))
+- [x] OpenTelemetry traces across catalog-api -> SNS/SQS (traceparent in message attributes) -> workers -> status events; trace id per video, "View pipeline trace" link in the UI
+- [x] JSON logs with trace ids -> OTel Collector -> Loki; Grafana links logs <-> traces
+- [x] Prometheus: worker job RED, API RED, queue/DLQ depth, video counts, SSE clients; kube-state-metrics + cAdvisor
+- [x] Dashboards from the repo (Pipeline, Services RED) and alert rules (DLQ, slow transcode, crash loop, 5xx) with runbooks
+- [x] `make up` (app + autoscaling + observability), `make demo`, `make dashboards`; GitOps platform apps (staging; prod paused for RAM)
+- [x] Acceptance: `make demo` 20 uploads -> workers 0 -> N -> 0 visible in Grafana, traces and logs linked; DLQ alert fired and resolved (2026-11-10, docs/results.md)
+
+**M6 complete (2026-11-10).**
+
+## M7
+Not started: load tests (k6), batch benchmarks at max workers 1/2/4, `make chaos`, README/demo script/resume bullets, docs/architecture.md.
