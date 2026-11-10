@@ -2,9 +2,9 @@
 # promote.yml copies this file to prod. One immutable git-SHA tag per service.
 catalogApi: { image: { tag: "unset" } }
 web: { image: { tag: "unset" } }
-progressSvc: { image: { tag: "unset" } }
-probeWorker: { image: { tag: "unset" } }
-transcodeWorker: { image: { tag: "unset" } }
-thumbnailWorker: { image: { tag: "unset" } }
+progressSvc: { image: { tag: "ded2547" } }
+probeWorker: { image: { tag: "ded2547" } }
+transcodeWorker: { image: { tag: "ded2547" } }
+thumbnailWorker: { image: { tag: "ded2547" } }
 snsShim: { image: { tag: "unset" } }
-terraform: { image: { tag: "unset" } }
+terraform: { image: { tag: "ded2547" } }
