@@ -73,4 +73,5 @@ grafana:
           query: '{k8s_namespace_name=~"streamforge.*"} |= "$${__span.traceId}"'
         nodeGraph: { enabled: true }
         search: { hide: false }
-  resources: { requests: { cpu: 20m, memory: 96Mi }, limits: { memory: 256Mi } }
+  # 256Mi was OOM-killed while loading the default Kubernetes dashboards
+  resources: { requests: { cpu: 20m, memory: 128Mi }, limits: { memory: 512Mi } }
