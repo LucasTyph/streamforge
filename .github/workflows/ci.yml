@@ -125,12 +125,12 @@ jobs:
         run: |
           tflint --init --config "$PWD/infra/terraform/.tflint.hcl"
           for d in aws local modules/pipeline; do tflint --chdir infra/terraform/$d --config "$PWD/infra/terraform/.tflint.hcl"; done
-      - uses: bridgecrewio/checkov-action@99bb2caf247dfd9f03cf984373bc6043d4e32ebf # v12.1347.0
-        with:
-          directory: infra/terraform/aws
-          framework: terraform
-          config_file: infra/terraform/aws/.checkov.yaml
-          download_external_modules: true
+      # Plain image instead of checkov-action: the action's container can't fetch registry
+      # modules pinned to commit refs. Same command as `make tf-aws-validate`.
+      - name: checkov
+        run: |
+          docker run --rm -v "$PWD/infra/terraform:/tf" bridgecrew/checkov:3.4.3 -d /tf/aws --framework terraform \
+            --config-file /tf/aws/.checkov.yaml --download-external-modules true --quiet --compact
 
   security:
     runs-on: ubuntu-24.04

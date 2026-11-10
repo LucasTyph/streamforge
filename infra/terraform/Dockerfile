@@ -3,6 +3,9 @@
 # `terraform init` would still contact registry.terraform.io). Build context: infra/terraform.
 FROM hashicorp/terraform:1.17.1
 ARG TARGETOS=linux TARGETARCH=amd64
+# The upstream image lags Alpine security fixes (Trivy found CRITICAL openssh CVEs in
+# alpine 3.24.3); apply them at build time.
+RUN apk upgrade --no-cache
 COPY modules /tf/modules
 COPY local/main.tf local/.terraform.lock.hcl /tf/local/
 # init (modules + providers, needs network at build time) -> mirror as zips for the target

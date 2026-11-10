@@ -31,7 +31,7 @@ jobs:
         with:
           filters: |
             sns-shim: ['go/go.*', 'go/Dockerfile', 'go/cmd/sns-shim/**', 'go/internal/snsshim/**']
-            progress-svc: ['go/go.*', 'go/Dockerfile', 'go/cmd/progress/**', 'go/internal/sse/**', 'go/internal/app/**']
+            progress-svc: ['go/go.*', 'go/Dockerfile', 'go/cmd/progress/**', 'go/internal/**'] # imports app -> pipeline -> ...
             probe-worker: ['go/go.*', 'go/Dockerfile.ffmpeg', 'go/internal/**', 'go/cmd/probe/**']
             transcode-worker: ['go/go.*', 'go/Dockerfile.ffmpeg', 'go/internal/**', 'go/cmd/transcode/**']
             thumbnail-worker: ['go/go.*', 'go/Dockerfile.ffmpeg', 'go/internal/**', 'go/cmd/thumbnail/**']
@@ -116,6 +116,8 @@ jobs:
 
   gitops:
     needs: build
+    # Record every image that did build, even if another service's build failed.
+    if: ${{ !cancelled() && needs.build.result != 'skipped' }}
     runs-on: ubuntu-24.04
     permissions:
       contents: write

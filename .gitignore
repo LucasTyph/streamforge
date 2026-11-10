@@ -23,7 +23,7 @@ coverage/
 crash.log
 
 # test media / data
-media/
+/media/  # generated test clips (root only: go/internal/media is source)
 *.mp4
 *.mov
 *.mkv
