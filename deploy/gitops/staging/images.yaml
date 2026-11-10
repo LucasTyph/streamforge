@@ -1,6 +1,6 @@
 # Managed by CI: release.yml sets a service's tag after building it from main;
 # promote.yml copies this file to prod. One immutable git-SHA tag per service.
-catalogApi: { image: { tag: "3cf2a54" } }
+catalogApi: { image: { tag: "38cc69c" } }
 web: { image: { tag: "3cf2a54" } }
 progressSvc: { image: { tag: "3cf2a54" } }
 probeWorker: { image: { tag: "3cf2a54" } }
