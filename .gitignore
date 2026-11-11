@@ -37,3 +37,4 @@ Thumbs.db
 .vscode/*
 !.vscode/extensions.json
 .external_modules/
+bench/

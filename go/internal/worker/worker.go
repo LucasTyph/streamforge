@@ -56,7 +56,9 @@ type Consumer struct {
 	OnGiveUp func(ctx context.Context, m Message, err error)
 
 	MaxReceiveCount   int           // must match the queue's redrive policy (default 3)
-	Visibility        time.Duration // extended on every heartbeat (default 60s)
+	WaitTime          time.Duration // long-poll wait (default 20s)
+	ClaimVisibility   time.Duration // visibility on receive, before work starts (default 20s)
+	Visibility        time.Duration // set when work starts, extended on every heartbeat (default 60s)
 	HeartbeatInterval time.Duration // default Visibility/3
 	DrainTimeout      time.Duration // how long an in-flight message may run after SIGTERM (default 20s)
 	RetryBackoff      time.Duration // visibility for a failed attempt, x attempt number (default 10s)
@@ -65,6 +67,12 @@ type Consumer struct {
 func (c *Consumer) defaults() {
 	if c.MaxReceiveCount == 0 {
 		c.MaxReceiveCount = 3
+	}
+	if c.WaitTime == 0 {
+		c.WaitTime = 20 * time.Second
+	}
+	if c.ClaimVisibility == 0 {
+		c.ClaimVisibility = 20 * time.Second
 	}
 	if c.Visibility == 0 {
 		c.Visibility = 60 * time.Second
@@ -82,18 +90,28 @@ func (c *Consumer) defaults() {
 
 // Run polls until ctx is cancelled (SIGTERM), then lets the in-flight message finish
 // within DrainTimeout; if it doesn't, the handler is cancelled and the message released.
+//
+// Two rules keep a dying worker from hiding messages (measured in docs/results.md: an
+// aborted long poll could still be answered, leaving a message invisible for the whole
+// visibility timeout and burning one of its receives):
+//   - the long poll is never aborted: on shutdown it runs to completion and anything it
+//     returns is released at once;
+//   - messages are claimed with a short visibility (ClaimVisibility) and only get the
+//     full Visibility when processing actually starts.
 func (c *Consumer) Run(ctx context.Context) error {
 	c.defaults()
 	c.Log.Info("consuming", "queue", c.QueueURL)
 	for ctx.Err() == nil {
-		out, err := c.SQS.ReceiveMessage(ctx, &sqs.ReceiveMessageInput{
+		rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), c.WaitTime+10*time.Second)
+		out, err := c.SQS.ReceiveMessage(rctx, &sqs.ReceiveMessageInput{
 			QueueUrl:                    &c.QueueURL,
 			MaxNumberOfMessages:         1,
-			WaitTimeSeconds:             20,
-			VisibilityTimeout:           int32(c.Visibility.Seconds()),
+			WaitTimeSeconds:             int32(c.WaitTime.Seconds()),
+			VisibilityTimeout:           int32(c.ClaimVisibility.Seconds()),
 			MessageSystemAttributeNames: []types.MessageSystemAttributeName{types.MessageSystemAttributeNameApproximateReceiveCount},
 			MessageAttributeNames:       []string{"All"}, // carries the trace context
 		})
+		cancel()
 		if err != nil {
 			if ctx.Err() != nil {
 				break
@@ -103,6 +121,13 @@ func (c *Consumer) Run(ctx context.Context) error {
 			continue
 		}
 		for _, m := range out.Messages {
+			if ctx.Err() != nil { // arrived while shutting down: hand it straight back
+				rel, cancelRel := context.WithTimeout(context.Background(), 5*time.Second)
+				c.setVisibility(rel, m.ReceiptHandle, 0, c.Log)
+				cancelRel()
+				c.Log.Info("released message received during shutdown", "messageId", aws.ToString(m.MessageId))
+				continue
+			}
 			c.process(ctx, m)
 		}
 	}
@@ -136,6 +161,8 @@ func (c *Consumer) process(pollCtx context.Context, raw types.Message) {
 	})
 	defer stopDrain()
 
+	// Work starts now: swap the short claim for the full visibility timeout.
+	c.setVisibility(jobCtx, raw.ReceiptHandle, c.Visibility, log)
 	hbDone := make(chan struct{})
 	go c.heartbeat(jobCtx, raw.ReceiptHandle, log, hbDone)
 

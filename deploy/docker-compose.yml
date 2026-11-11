@@ -83,7 +83,7 @@ services:
       VIDEO_PROBED_TOPIC_ARN: arn:aws:sns:us-east-1:000000000000:streamforge-video-probed
       PROBE_QUEUE_URL: http://elasticmq:9324/000000000000/streamforge-probe
     depends_on: [elasticmq, sns-shim, seaweedfs, redis]
-    stop_grace_period: 40s
+    stop_grace_period: 60s
     mem_limit: 128m
 
   transcode-worker:
@@ -95,7 +95,7 @@ services:
       TRANSCODE_QUEUE_URL: http://elasticmq:9324/000000000000/streamforge-transcode
     tmpfs: ["/work:size=1g,uid=65532,gid=65532"]
     depends_on: [elasticmq, sns-shim, seaweedfs, redis]
-    stop_grace_period: 15s
+    stop_grace_period: 35s
     cpus: 2
     mem_limit: 1g
 
@@ -108,7 +108,7 @@ services:
       THUMBNAIL_QUEUE_URL: http://elasticmq:9324/000000000000/streamforge-thumbnail
     tmpfs: ["/work:size=256m,uid=65532,gid=65532"]
     depends_on: [elasticmq, sns-shim, seaweedfs, redis]
-    stop_grace_period: 30s
+    stop_grace_period: 50s
     cpus: 1
     mem_limit: 384m
 

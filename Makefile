@@ -4,7 +4,7 @@ COMPOSE := docker compose --env-file .env -f deploy/docker-compose.yml
 LOAD_ENV := set -a && source .env && set +a
 
 .PHONY: observability dashboards grafana-password demo test-go-integration test-api-integration test-e2e media cluster platform secrets images deploy status help env dev dev-infra tf-local seed down clean test test-integration smoke lint \
-        up up-lite demo load chaos tf-aws-validate argocd gitops-up gitops-owner security
+        up up-lite demo load loadtest loadtest-upload benchmark chaos tf-aws-validate argocd gitops-up gitops-owner security
 
 help: ## List targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
@@ -171,8 +171,18 @@ demo: ## Upload DEMO_N (20) clips at once to the k3d stack; watch Grafana 'Strea
 	scripts/gen-test-media.sh demo $(DEMO_N)
 	API_URL=http://streamforge.localhost/api node scripts/upload-videos.mjs --expect READY media/demo/*.mp4
 
-chaos load: ## (M7) Chaos and load tests (`load` cannot start a line: it is a make directive)
-	@echo "'make $@' arrives in M7."; exit 1
+loadtest load: ## k6 API load test (RATE=50 req/s, DURATION=2m) against the k3d stack
+	k6 run -e RATE=$(or $(RATE),50) -e DURATION=$(or $(DURATION),2m) loadtest/k6/api-browse.js
+
+loadtest-upload: ## k6 upload burst: VUS (10) users upload one clip each at the same time
+	scripts/gen-test-media.sh demo 20 >/dev/null
+	k6 run -e VUS=$(or $(VUS),10) loadtest/k6/upload-burst.js
+
+benchmark: ## Batch benchmark at max transcode workers 1, 2 and 4 (results in bench/)
+	scripts/benchmark.sh bench
+
+chaos: ## Kill random worker pods during a 20-clip batch; verify nothing is lost or duplicated
+	scripts/chaos.sh bench
 
 # ---- GitOps (ArgoCD) ---------------------------------------------------------
 ARGOCD_CHART_VERSION := 10.17.1

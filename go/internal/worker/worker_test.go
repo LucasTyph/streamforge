@@ -17,6 +17,8 @@ import (
 
 type fakeSQS struct {
 	mu         sync.Mutex
+	late       *types.Message  // delivered once `shutdown` is closed
+	shutdown   <-chan struct{} // the consumer's context Done channel
 	pending    []types.Message
 	deleted    int
 	visibility []int32
@@ -30,9 +32,19 @@ func (f *fakeSQS) ReceiveMessage(ctx context.Context, _ *sqs.ReceiveMessageInput
 		f.mu.Unlock()
 		return &sqs.ReceiveMessageOutput{Messages: []types.Message{m}}, nil
 	}
+	late := f.late
+	f.late = nil
 	f.mu.Unlock()
-	<-ctx.Done()
-	return nil, ctx.Err()
+	if late != nil { // a long poll answered only after shutdown began
+		<-f.shutdown
+		return &sqs.ReceiveMessageOutput{Messages: []types.Message{*late}}, nil
+	}
+	select { // empty long poll
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-time.After(5 * time.Millisecond):
+		return &sqs.ReceiveMessageOutput{}, nil
+	}
 }
 
 func (f *fakeSQS) DeleteMessage(context.Context, *sqs.DeleteMessageInput, ...func(*sqs.Options)) (*sqs.DeleteMessageOutput, error) {
@@ -85,8 +97,9 @@ func TestTransientFailureBacksOffWithoutGivingUp(t *testing.T) {
 	if f.deleted != 0 || gaveUp {
 		t.Fatalf("deleted=%d gaveUp=%v, want 0/false", f.deleted, gaveUp)
 	}
-	if len(f.visibility) != 1 || f.visibility[0] != 20 {
-		t.Fatalf("visibility = %v, want [20] (10s x attempt 2)", f.visibility)
+	// first call swaps the short claim for the full visibility; the last is the backoff
+	if len(f.visibility) != 2 || f.visibility[0] != 60 || f.visibility[1] != 20 {
+		t.Fatalf("visibility = %v, want [60 20] (claim extension, then 10s x attempt 2)", f.visibility)
 	}
 }
 
@@ -152,4 +165,48 @@ func TestHeartbeatExtendsVisibility(t *testing.T) {
 	if len(f.visibility) < 3 || f.visibility[0] != 120 {
 		t.Fatalf("visibility = %v, want several 120s heartbeats", f.visibility)
 	}
+}
+
+func TestMessageReceivedDuringShutdownIsReleasedNotProcessed(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	m := msg(1)
+	f := &fakeSQS{late: &m, shutdown: ctx.Done()}
+	handled := false
+	c := &Consumer{SQS: f, QueueURL: "q", Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Handle: func(context.Context, Message) error { handled = true; return nil }}
+	done := make(chan struct{})
+	go func() { _ = c.Run(ctx); close(done) }()
+	time.Sleep(20 * time.Millisecond) // consumer is inside the long poll
+	cancel()                          // SIGTERM: the poll is not aborted, it returns the message
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("consumer did not stop")
+	}
+	if handled || f.deleted != 0 || len(f.visibility) != 1 || f.visibility[0] != 0 {
+		t.Fatalf("handled=%v deleted=%d visibility=%v; want the message released untouched", handled, f.deleted, f.visibility)
+	}
+}
+
+func TestReceiveUsesShortClaim(t *testing.T) {
+	var got int32 = -1
+	f := &claimSQS{fakeSQS: fakeSQS{}, onReceive: func(v int32) { got = v }}
+	c := &Consumer{SQS: f, QueueURL: "q", Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Handle: func(context.Context, Message) error { return nil }, Visibility: 2 * time.Minute}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	_ = c.Run(ctx)
+	if got != 20 {
+		t.Fatalf("receive visibility = %d, want the 20s claim (not the 120s work timeout)", got)
+	}
+}
+
+type claimSQS struct {
+	fakeSQS
+	onReceive func(int32)
+}
+
+func (c *claimSQS) ReceiveMessage(ctx context.Context, in *sqs.ReceiveMessageInput, o ...func(*sqs.Options)) (*sqs.ReceiveMessageOutput, error) {
+	c.onReceive(in.VisibilityTimeout)
+	return c.fakeSQS.ReceiveMessage(ctx, in, o...)
 }

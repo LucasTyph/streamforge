@@ -127,7 +127,7 @@ probeWorker:
   secretEnv: *awsSecretEnv
   probes: { port: 8080 }
   emptyDirs: [{ name: work, mountPath: /work, sizeLimit: 64Mi }]
-  terminationGracePeriodSeconds: 40 # > DrainTimeout (30 s)
+  terminationGracePeriodSeconds: 60 # > long poll (20 s) + DrainTimeout (30 s)
   resources:
     requests: { cpu: 50m, memory: 32Mi }
     limits: { memory: 128Mi }
@@ -144,7 +144,7 @@ transcodeWorker:
   secretEnv: *awsSecretEnv
   probes: { port: 8080 }
   emptyDirs: [{ name: work, mountPath: /work, sizeLimit: 1Gi }]
-  terminationGracePeriodSeconds: 15 # > DrainTimeout (5 s); long jobs are released, not finished
+  terminationGracePeriodSeconds: 35 # > long poll (20 s) + DrainTimeout (5 s); long jobs are released, not finished
   resources:
     requests: { cpu: 500m, memory: 256Mi }
     limits: { cpu: "2", memory: 1Gi }
@@ -160,7 +160,7 @@ thumbnailWorker:
   secretEnv: *awsSecretEnv
   probes: { port: 8080 }
   emptyDirs: [{ name: work, mountPath: /work, sizeLimit: 256Mi }]
-  terminationGracePeriodSeconds: 30 # > DrainTimeout (20 s)
+  terminationGracePeriodSeconds: 50 # > long poll (20 s) + DrainTimeout (20 s)
   resources:
     requests: { cpu: 200m, memory: 96Mi }
     limits: { cpu: "1", memory: 384Mi }

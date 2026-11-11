@@ -1,9 +1,12 @@
 #!/usr/bin/env node
 // Uploads video files through the public API exactly like the browser does (presigned
 // multipart), then waits for each to reach READY or FAILED and checks HLS playback.
-// Usage: node scripts/upload-videos.mjs [--expect READY|FAILED] file...
+// Usage: node scripts/upload-videos.mjs [--expect READY|FAILED] [--verify] [--json out.json] file...
+//   --verify  check every HLS variant of READY videos: ENDLIST present, every segment
+//             fetchable, segment durations add up to the video duration (no gaps/duplicates)
+//   --json    write timings and results for benchmarks
 // Env: API_URL (default http://localhost:4000), SEED_USER_EMAIL / SEED_USER_PASSWORD.
-import { open, stat } from "node:fs/promises";
+import { open, stat, writeFile } from "node:fs/promises";
 import { request } from "node:http";
 import { basename, extname } from "node:path";
 
@@ -50,11 +53,34 @@ async function pool(items, limit, fn) {
   return out;
 }
 const args = process.argv.slice(2);
-let expect;
-if (args[0] === "--expect") [, expect] = args.splice(0, 2);
+let expect, jsonOut, verify = false;
+for (;;) {
+  if (args[0] === "--expect") [, expect] = args.splice(0, 2);
+  else if (args[0] === "--json") [, jsonOut] = args.splice(0, 2);
+  else if (args[0] === "--verify") verify = args.splice(0, 1).length > 0;
+  else break;
+}
 if (!args.length) {
-  console.error("usage: upload-videos.mjs [--expect READY|FAILED] file...");
+  console.error("usage: upload-videos.mjs [--expect READY|FAILED] [--verify] [--json out.json] file...");
   process.exit(2);
+}
+
+/** Returns a list of integrity problems for a READY video's HLS output (empty = intact). */
+async function verifyHls(v, variants) {
+  const problems = [];
+  for (const variant of variants) {
+    const url = new URL(variant, v.playbackUrl).toString();
+    const text = await xfetch(url).then((r) => r.text());
+    if (!text.includes("#EXT-X-ENDLIST")) problems.push(`${variant}: no ENDLIST`);
+    const segs = text.split("\n").filter((l) => l.endsWith(".ts"));
+    if (new Set(segs).size !== segs.length) problems.push(`${variant}: duplicate segments`);
+    const total = [...text.matchAll(/#EXTINF:([\d.]+)/g)].reduce((a, m) => a + Number(m[1]), 0);
+    if (Math.abs(total - v.durationSeconds) > 0.5) problems.push(`${variant}: ${total.toFixed(1)}s of segments for a ${v.durationSeconds.toFixed(1)}s video`);
+    const heads = await pool(segs, 8, (seg) => xfetch(new URL(seg, url).toString(), { method: "HEAD" }).then((r) => r.status));
+    const missing = heads.filter((c) => c !== 200).length;
+    if (missing) problems.push(`${variant}: ${missing} of ${segs.length} segments missing`);
+  }
+  return problems;
 }
 
 let cookie = "";
@@ -102,30 +128,55 @@ async function uploadOne(file) {
 
 async function waitFor({ id, file, uploadedAt }) {
   for (;;) {
-    const v = await api(`/videos/${id}`);
-    if (v.status === "READY" || v.status === "FAILED") {
-      const secs = ((Date.now() - uploadedAt) / 1000).toFixed(1);
+    // tolerate transient errors (pods restarting during chaos runs)
+    const v = await api(`/videos/${id}`).catch(() => null);
+    if (v && (v.status === "READY" || v.status === "FAILED")) {
+      const secs = (Date.now() - uploadedAt) / 1000;
       let detail = v.status === "FAILED" ? `reason="${v.failureReason}"` : "";
+      let problems = [];
       if (v.status === "READY") {
         const master = await xfetch(v.playbackUrl).then((r) => r.text());
         const variants = master.split("\n").filter((l) => l.endsWith(".m3u8"));
         const first = await xfetch(new URL(variants[0], v.playbackUrl).toString()).then((r) => r.text());
         const segs = first.split("\n").filter((l) => l.endsWith(".ts")).length;
         detail = `${v.width}x${v.height} ${v.durationSeconds?.toFixed(1)}s variants=[${variants.join(", ")}] segments(${variants[0]})=${segs}`;
+        if (verify) {
+          problems = await verifyHls(v, variants);
+          if (!v.posterUrl || !v.thumbnailsVttUrl) problems.push("thumbnails missing");
+          detail += problems.length ? `  INTEGRITY: ${problems.join("; ")}` : "  intact";
+        }
       }
+      const attempts = Object.fromEntries(v.jobs.map((j) => [j.task, j.attempts]));
       const jobs = v.jobs.map((j) => `${j.task}:${j.state}/${j.attempts}`).join(" ");
-      return { file: basename(file), id, status: v.status, secs, detail, jobs };
+      return { file: basename(file), id, status: v.status, secs, detail, jobs, attempts, problems };
     }
-    await new Promise((r) => setTimeout(r, 1000));
+    await new Promise((r) => setTimeout(r, 500));
   }
 }
 
-const uploads = await pool(args, FILES, uploadOne);
-const results = await Promise.all(uploads.map(waitFor));
+// Start watching each video as soon as its own upload completes, so time-to-ready is
+// measured per video (upload complete -> READY), not from the end of the whole batch.
+const startedAt = Date.now();
+const results = await Promise.all(await pool(args, FILES, async (f) => waitFor(await uploadOne(f)).catch((e) => { throw e; })).catch((e) => { console.error(e); process.exit(1); }));
+const totalSeconds = (Date.now() - startedAt) / 1000;
 let ok = true;
 for (const r of results) {
-  const bad = expect && r.status !== expect;
+  const bad = (expect && r.status !== expect) || r.problems.length > 0;
   ok &&= !bad;
-  console.log(`${bad ? "FAIL" : "ok  "} ${r.file.padEnd(32)} ${r.status.padEnd(6)} ${r.secs.padStart(5)}s  ${r.detail}  [${r.jobs}]`);
+  console.log(`${bad ? "FAIL" : "ok  "} ${r.file.padEnd(32)} ${r.status.padEnd(6)} ${r.secs.toFixed(1).padStart(5)}s  ${r.detail}  [${r.jobs}]`);
 }
+const sorted = results.map((r) => r.secs).sort((a, b) => a - b);
+const pct = (q) => sorted[Math.min(sorted.length - 1, Math.ceil(q * sorted.length) - 1)];
+const summary = {
+  videos: results.length,
+  ready: results.filter((r) => r.status === "READY").length,
+  totalSeconds: Number(totalSeconds.toFixed(1)),
+  videosPerMinute: Number(((results.length / totalSeconds) * 60).toFixed(2)),
+  timeToReadyP50: Number(pct(0.5).toFixed(1)),
+  timeToReadyP95: Number(pct(0.95).toFixed(1)),
+  extraAttempts: results.reduce((a, r) => a + Object.values(r.attempts).reduce((x, n) => x + Math.max(0, n - 1), 0), 0),
+  integrityProblems: results.reduce((a, r) => a + r.problems.length, 0),
+};
+if (results.length > 1) console.log("summary " + JSON.stringify(summary));
+if (jsonOut) await writeFile(jsonOut, JSON.stringify({ summary, results }, null, 1));
 process.exit(ok ? 0 : 1);
