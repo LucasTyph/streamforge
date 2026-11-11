@@ -32,14 +32,17 @@ export async function sweepDeadLetters(o: Omit<DlqWatcherOptions, "intervalMs">)
   let marked = 0;
   for (const task of TASKS) {
     const QueueUrl = await o.queues.url(`${task}-dlq`);
-    // Peek in small batches; the short visibility only keeps one batch from being returned
-    // twice within this pass, and leaves the messages in the DLQ for inspection/redrive.
+    // Peek with visibility 0 so the messages are never hidden from the Ops page or a
+    // redrive (a 5 s visibility here made a redrive move 0 messages). Stop when a batch
+    // brings nothing new.
+    const seen = new Set<string>();
     for (let batch = 0; batch < 5; batch++) {
       const out = await o.queues.sqs.send(
-        new ReceiveMessageCommand({ QueueUrl, MaxNumberOfMessages: 10, VisibilityTimeout: 5, WaitTimeSeconds: 0 }),
+        new ReceiveMessageCommand({ QueueUrl, MaxNumberOfMessages: 10, VisibilityTimeout: 0, WaitTimeSeconds: 0 }),
       );
-      const messages = out.Messages ?? [];
+      const messages = (out.Messages ?? []).filter((m) => m.MessageId && !seen.has(m.MessageId));
       if (!messages.length) break;
+      for (const m of messages) seen.add(m.MessageId!);
       for (const m of messages) {
         let videoId: unknown;
         try {
