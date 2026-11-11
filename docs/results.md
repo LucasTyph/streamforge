@@ -133,3 +133,25 @@ Per namespace: streamforge 3045 MiB, monitoring 2568 MiB, kube-system 368 MiB, k
 ## Tracing and alerting checks (M6)
 - One video = one trace: 31 spans across catalog-api, probe-worker, transcode-worker and thumbnail-worker (ffprobe 213 ms, ffmpeg transcode 14.2 s, thumbnails 6.2 s, 6 status events applied); Loki held 12 log lines from the same 4 services carrying that trace id.
 - `StreamForgeDLQNotEmpty`: one message put on the thumbnail DLQ -> alert `firing` after 81 s (1 m `for` + scrape/evaluation) and active in Alertmanager; after purging the DLQ it returned to `inactive` within 30 s.
+
+## Load, benchmark and chaos (M7, 2026-11-11)
+Setup: `make up` on k3d in WSL2 (10 GB, 6 vCPU), observability running. Single runs.
+
+**k6 API load** (`make load`, list + detail, 4 API replicas): 50 req/s for 2 min: 5,997 requests, 0 failed, p95 12.3 ms (6 dropped iterations during one 1.45 s spike). 200 req/s for 1 min: 12,003 requests, 0 failed, p95 10.9 ms, 0 dropped.
+
+**k6 upload burst** (`make loadtest-upload`): 10 users each uploading a 25.5 MB clip at once (255 MB, presigned multipart): all complete in 4.9 s, 0 failed requests.
+
+**Batch benchmark** (`make benchmark`, 20 clips of 20-45 s 720p, 585 MB, uploads 5 at a time; time-to-ready = upload complete -> READY):
+```
+workers  videos  total_s   videos/min  p50_s     p95_s     extra_attempts
+1        20/20   305.5     3.93        70.1      81.1      3
+2        20/20   202       5.94        45.2      56.2      1
+4        20/20   228.9     5.24        48.2      86.7      2
+```
+Going from 1 to 2 transcode workers cut total time by 34%. 4 workers gave no further gain on this machine: four parallel ffmpeg jobs saturate the 6 vCPUs (average transcode 13 s alone vs 30 s with four in parallel). Other 4-worker runs took 186-196 s.
+
+Before the worker fix in ADR-003 (amendment), the same benchmark gave 302.8 / 328.0 / 196.2 s total and p95 124 / 178 / 77 s: messages handed to dying workers stayed hidden for 60-120 s.
+
+**Chaos** (`make chaos`, a random worker pod killed every 12 s, alternating graceful and hard, during a 20-clip batch):
+- Run 1 (before the DLQ watcher): 40 kills in ~8 min; 18/20 READY; 2 transcode messages were killed on all 3 receives and dead-lettered, leaving their videos in PROCESSING. With the watcher deployed they were marked FAILED with a reason within 30 s; a redrive moved both and they were READY 45 s later.
+- Run 2 (final code): 28 kills (14 hard, 14 graceful); 20/20 READY in 392 s without a redrive; 14 jobs needed more than one attempt; 0 integrity problems (every HLS variant: ENDLIST, all segments present, durations add up); 0 dead-lettered messages. `CHAOS PASS`.
