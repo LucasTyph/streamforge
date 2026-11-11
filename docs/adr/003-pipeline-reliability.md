@@ -74,3 +74,23 @@ retried.
   identical, so the result is still correct; it only costs CPU.
 - Processed media is publicly readable from the local S3 endpoint (anonymous read on the
   processed bucket only). Production would put it behind CloudFront with signed cookies.
+
+## Amendment (2026-11-11): messages hidden by dying workers
+The M7 batch benchmark showed jobs with 2-3 attempts although no attempt had failed, and
+videos that took 110-245 s where 30-40 s was typical. Cause: when KEDA scaled a worker
+down, the pod died in the middle of a 20 s long poll. The aborted request could still be
+answered by the queue, so a message was "received" by nobody, stayed invisible for the
+whole visibility timeout (60-120 s) and lost one of its 3 receives.
+
+Changes in `go/internal/worker`:
+- **The long poll is never aborted.** On SIGTERM the poll runs to completion (at most
+  20 s) and any message it returns is released immediately (visibility 0).
+- **Short claim, then extend.** Messages are received with a 20 s visibility; the full
+  timeout (60-120 s) is set only when processing starts, and heartbeats extend it. A
+  message picked up by a worker that dies before starting is back within 20 s.
+- `terminationGracePeriodSeconds` now covers long poll + drain (probe 60 s, transcode
+  35 s, thumbnail 50 s).
+
+A released or hidden message still uses up a receive (SQS has no way to give one back),
+so a message that is unlucky three times lands in the DLQ without having failed. The Ops
+page redrive covers that case; before/after numbers are in docs/results.md.

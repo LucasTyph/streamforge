@@ -5,6 +5,7 @@
 //   --verify  check every HLS variant of READY videos: ENDLIST present, every segment
 //             fetchable, segment durations add up to the video duration (no gaps/duplicates)
 //   --json    write timings and results for benchmarks
+//   --ids     arguments are existing video ids; wait until each is READY (after a redrive)
 // Env: API_URL (default http://localhost:4000), SEED_USER_EMAIL / SEED_USER_PASSWORD.
 import { open, stat, writeFile } from "node:fs/promises";
 import { request } from "node:http";
@@ -53,11 +54,12 @@ async function pool(items, limit, fn) {
   return out;
 }
 const args = process.argv.slice(2);
-let expect, jsonOut, verify = false;
+let expect, jsonOut, verify = false, idsMode = false;
 for (;;) {
   if (args[0] === "--expect") [, expect] = args.splice(0, 2);
   else if (args[0] === "--json") [, jsonOut] = args.splice(0, 2);
   else if (args[0] === "--verify") verify = args.splice(0, 1).length > 0;
+  else if (args[0] === "--ids") idsMode = args.splice(0, 1).length > 0; // args are video ids: wait until READY
   else break;
 }
 if (!args.length) {
@@ -130,7 +132,7 @@ async function waitFor({ id, file, uploadedAt }) {
   for (;;) {
     // tolerate transient errors (pods restarting during chaos runs)
     const v = await api(`/videos/${id}`).catch(() => null);
-    if (v && (v.status === "READY" || v.status === "FAILED")) {
+    if (v && (v.status === "READY" || (v.status === "FAILED" && !idsMode))) {
       const secs = (Date.now() - uploadedAt) / 1000;
       let detail = v.status === "FAILED" ? `reason="${v.failureReason}"` : "";
       let problems = [];
@@ -157,7 +159,9 @@ async function waitFor({ id, file, uploadedAt }) {
 // Start watching each video as soon as its own upload completes, so time-to-ready is
 // measured per video (upload complete -> READY), not from the end of the whole batch.
 const startedAt = Date.now();
-const results = await Promise.all(await pool(args, FILES, async (f) => waitFor(await uploadOne(f)).catch((e) => { throw e; })).catch((e) => { console.error(e); process.exit(1); }));
+const results = idsMode
+  ? await Promise.all(args.map((id) => waitFor({ id, file: id, uploadedAt: startedAt })))
+  : await pool(args, FILES, async (f) => waitFor(await uploadOne(f))).catch((e) => { console.error(e); process.exit(1); });
 const totalSeconds = (Date.now() - startedAt) / 1000;
 let ok = true;
 for (const r of results) {
