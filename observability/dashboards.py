@@ -75,7 +75,7 @@ traces = panel("table", "Recent transcode traces (click a trace ID)", 0, 21, 12,
 traces["transformations"] = [{"id": "organize", "options": {"excludeByName": {"nested": True}}}]
 logs = panel("logs", "Warnings and errors", 12, 21, 12, 9, [
     {"refId": "A", "datasource": LOKI,
-     "expr": '{k8s_namespace_name="$namespace"} |~ "(?i)\\"level\\":(\\"(warn|error)\\"|[45]0)"'}], ds=LOKI)
+     "expr": '{k8s_namespace_name="$namespace", k8s_deployment_name=~".+"} |~ "(?i)\\"level\\":(\\"(warn|error)\\"|[45]0)"'}], ds=LOKI)
 logs["options"] = {"showTime": True, "wrapLogMessage": True, "sortOrder": "Descending", "enableLogDetails": True}
 
 pipeline = dashboard("streamforge-pipeline", "StreamForge / Pipeline", [

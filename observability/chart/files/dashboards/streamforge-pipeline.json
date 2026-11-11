@@ -475,7 +475,7 @@
       "type": "loki",
       "uid": "loki"
      },
-     "expr": "{k8s_namespace_name=\"$namespace\"} |~ \"(?i)\\\"level\\\":(\\\"(warn|error)\\\"|[45]0)\""
+     "expr": "{k8s_namespace_name=\"$namespace\", k8s_deployment_name=~\".+\"} |~ \"(?i)\\\"level\\\":(\\\"(warn|error)\\\"|[45]0)\""
     }
    ],
    "fieldConfig": {

@@ -81,5 +81,11 @@ Known issue: a single-replica rollout returned one `504` through Traefik (no pre
 
 **M6 complete (2026-11-10).**
 
-## M7
-Not started: load tests (k6), batch benchmarks at max workers 1/2/4, `make chaos`, README/demo script/resume bullets, docs/architecture.md.
+## M7 — Prove it + present it
+- [x] k6: API load (`make load`) and upload burst (`make loadtest-upload`)
+- [x] Batch benchmark at max transcode workers 1/2/4 (`make benchmark`): total time, throughput, p50/p95 time-to-ready
+- [x] `make chaos`: random graceful + hard pod kills during a batch, integrity check of every HLS variant, DLQ redrive; passes
+- [x] Bugs found by these runs and fixed: messages hidden by dying workers (never abort the long poll, short-claim receives); videos stuck when a worker dies on the last receive (DLQ watcher marks FAILED)
+- [x] docs/results.md, docs/architecture.md, README (screenshots, results table, production notes), docs/demo-script.md, docs/resume-bullets.md, runbooks
+- [ ] GitOps platform apps (KEDA + observability via ArgoCD) verified on a fresh cluster
+- [ ] Hero GIFs for the README (recorded by hand, see docs/demo-script.md); screenshots are in place meanwhile
