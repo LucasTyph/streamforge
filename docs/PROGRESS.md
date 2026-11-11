@@ -87,5 +87,7 @@ Known issue: a single-replica rollout returned one `504` through Traefik (no pre
 - [x] `make chaos`: random graceful + hard pod kills during a batch, integrity check of every HLS variant, DLQ redrive; passes
 - [x] Bugs found by these runs and fixed: messages hidden by dying workers (never abort the long poll, short-claim receives); videos stuck when a worker dies on the last receive (DLQ watcher marks FAILED)
 - [x] docs/results.md, docs/architecture.md, README (screenshots, results table, production notes), docs/demo-script.md, docs/resume-bullets.md, runbooks
-- [ ] GitOps platform apps (KEDA + observability via ArgoCD) verified on a fresh cluster
+- [x] GitOps platform apps verified on a fresh cluster: all 10 ArgoCD Applications healthy in ~11 min, e2e passes on staging (2026-11-11)
+
+**M7 complete (2026-11-11)** apart from the hand-recorded GIFs below.
 - [ ] Hero GIFs for the README (recorded by hand, see docs/demo-script.md); screenshots are in place meanwhile

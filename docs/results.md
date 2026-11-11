@@ -155,3 +155,8 @@ Before the worker fix in ADR-003 (amendment), the same benchmark gave 302.8 / 32
 **Chaos** (`make chaos`, a random worker pod killed every 12 s, alternating graceful and hard, during a 20-clip batch):
 - Run 1 (before the DLQ watcher): 40 kills in ~8 min; 18/20 READY; 2 transcode messages were killed on all 3 receives and dead-lettered, leaving their videos in PROCESSING. With the watcher deployed they were marked FAILED with a reason within 30 s; a redrive moved both and they were READY 45 s later.
 - Run 2 (final code): 28 kills (14 hard, 14 graceful); 20/20 READY in 392 s without a redrive; 14 jobs needed more than one attempt; 0 integrity problems (every HLS variant: ENDLIST, all segments present, durations add up); 0 dead-lettered messages. `CHAOS PASS`.
+
+## GitOps from an empty cluster (M7, 2026-11-11)
+- **Command:** `k3d cluster delete streamforge && make gitops-up`, then polling `kubectl -n argocd get applications` every 15 s.
+- **Result:** `gitops-up exit=0 seconds=112` (cluster + ArgoCD + secrets + root app); all 10 Applications `Synced`/`Healthy` 641 s after the start: cnpg-operator, keda, kube-prometheus-stack, loki, tempo, otel-collector, streamforge-observability, staging-deps, staging-app, root. catalog-api restarted 4 times while Postgres was still starting.
+- **Check:** staging ran only CI-built GHCR images (`catalog-api:269263d`); workers were at 0 replicas; `E2E_BASE_URL=http://staging.streamforge.localhost make test-e2e` passed 2/2 (upload -> KEDA scale-up -> READY -> plays in 43.8 s; corrupt upload FAILED with reason); the transcode trace for that upload was in Tempo.
